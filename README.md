@@ -159,8 +159,12 @@ Claude-Switcher/
 ├── Tests/SwitcherCoreTests/   # Swift Testing suite for SwitcherCore
 ├── Resources/                 # App icon (Icon Composer) and string catalog
 ├── docs/assets/               # Logo and screenshots
+├── docs/dmg/                  # DMG window background, 1x and 2x
 ├── scripts/
 │   ├── build-app.sh           # Build, and with --install put it in /Applications
+│   ├── make-dmg.sh            # Pack the built app into build/Claude-Switcher.dmg
+│   ├── dmg-settings.py        # DMG window layout (dmgbuild)
+│   ├── render-dmg-background.swift
 │   └── render-logo.swift      # Renders docs/assets/logo.png
 ├── project.yml                # XcodeGen project definition
 ├── Package.swift              # SwitcherCore package
@@ -178,9 +182,11 @@ Claude-Switcher/
 
 ### From a Release
 
-1. Download `Claude-Switcher.zip` from the [latest release](https://github.com/ElsiKora/Claude-Switcher/releases/latest).
-2. Unzip it and move **Claude Switcher.app** to `/Applications`.
+1. Download `Claude-Switcher.dmg` from the [latest release](https://github.com/ElsiKora/Claude-Switcher/releases/latest) and open it.
+2. Drag **Claude Switcher** onto **Applications**.
 3. The build is signed ad hoc and not notarized, so macOS blocks it the first time. Open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
+
+A `.zip` of the app is attached to each release too.
 
 ### From Source
 
@@ -191,6 +197,12 @@ scripts/build-app.sh --install
 ```
 
 `scripts/build-app.sh` generates the Xcode project, builds a Release app into `build/`, and with `--install` replaces `/Applications/Claude Switcher.app` and opens it.
+
+To pack it as a disk image like the releases (needs `pip install dmgbuild`):
+
+```bash
+scripts/make-dmg.sh
+```
 
 ### Development Setup
 
