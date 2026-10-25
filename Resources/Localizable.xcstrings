@@ -1,0 +1,528 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "" : {
+
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
+    },
+    "%lld chats and %lld projects brought along." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld chats and %2$lld projects brought along."
+          }
+        }
+      }
+    },
+    "%lld chats cut off mid-reply continue there." : {
+
+    },
+    "%lld missing" : {
+
+    },
+    "%lld need sign-in" : {
+
+    },
+    "%lld of %lld signed in" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld signed in"
+          }
+        }
+      }
+    },
+    "%lld on" : {
+
+    },
+    "1 needs sign-in" : {
+
+    },
+    "5-hour %@ · Weekly %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "5-hour %1$@ · Weekly %2$@"
+          }
+        }
+      }
+    },
+    "5-hour limit" : {
+
+    },
+    "5-hour resets %@" : {
+
+    },
+    "5h" : {
+
+    },
+    "Access to “Claude Safe Storage” in the keychain was denied." : {
+
+    },
+    "Accounts" : {
+
+    },
+    "Active" : {
+
+    },
+    "Activity" : {
+
+    },
+    "Add Account…" : {
+
+    },
+    "Add Another Account" : {
+
+    },
+    "Add it again to sign in" : {
+
+    },
+    "Add the account again to sign in once more" : {
+
+    },
+    "Added %@." : {
+
+    },
+    "Adds %@’s missing connectors to %@’s claude.ai account with their tool switches, approvals and permissions, and turns on the same plugins and skills, the way claude.ai’s Settings do. Nothing is removed or turned off. You then sign in to each new connector in Claude." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Adds %1$@’s missing connectors to %2$@’s claude.ai account with their tool switches, approvals and permissions, and turns on the same plugins and skills, the way claude.ai’s Settings do. Nothing is removed or turned off. You then sign in to each new connector in Claude."
+          }
+        }
+      }
+    },
+    "Adds missing connectors with their tool settings and turns on the same plugins and skills." : {
+
+    },
+    "Another switch is still running." : {
+
+    },
+    "Anthropic asked to wait before checking usage again." : {
+
+    },
+    "Automatic Switching" : {
+
+    },
+    "Bringing chats into the new account" : {
+
+    },
+    "Bringing chats, projects and settings along…" : {
+
+    },
+    "Brought %lld chats and %lld projects into %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Brought %1$lld chats and %2$lld projects into %3$@."
+          }
+        }
+      }
+    },
+    "Cancel" : {
+
+    },
+    "Check for updates daily" : {
+
+    },
+    "Checked %@." : {
+
+    },
+    "Checking usage…" : {
+
+    },
+    "Claude Code settings" : {
+
+    },
+    "Claude Code settings copied over." : {
+
+    },
+    "Claude Switcher" : {
+
+    },
+    "Claude continues %lld chats cut off by the restart." : {
+
+    },
+    "Claude continues %lld chats cut off by the restart; they check on %lld side sessions." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Claude continues %1$lld chats cut off by the restart; they check on %2$lld side sessions."
+          }
+        }
+      }
+    },
+    "Claude did not quit." : {
+
+    },
+    "Claude is closed" : {
+
+    },
+    "Claude is not installed in Applications." : {
+
+    },
+    "Claude is on its sign-in screen. Sign in with the other account." : {
+
+    },
+    "Claude is running" : {
+
+    },
+    "Claude stores its sign-in in a format this app does not know." : {
+
+    },
+    "Click to switch" : {
+
+    },
+    "Closing Claude. It saves every chat first, which can take a minute." : {
+
+    },
+    "Compared with %@" : {
+
+    },
+    "Connectors" : {
+
+    },
+    "Connectors are signed in to in Claude, in the account it is signed in with. Switch to this account to sign in to them." : {
+
+    },
+    "Connectors, plugins and skills live on claude.ai in each account." : {
+
+    },
+    "Copied %lld connectors, %lld plugins, %lld skills and %lld tool settings." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Copied %1$lld connectors, %2$lld plugins, %3$lld skills and %4$lld tool settings."
+          }
+        }
+      }
+    },
+    "Copy Setup" : {
+
+    },
+    "Copy Setup…" : {
+
+    },
+    "Could not copy the setup: %@" : {
+
+    },
+    "Could not decrypt Claude’s sign-in." : {
+
+    },
+    "Could not read claude.ai: %@" : {
+
+    },
+    "Could not read “Claude Safe Storage” from the keychain (%d)." : {
+
+    },
+    "Data" : {
+
+    },
+    "Dismiss" : {
+
+    },
+    "Download" : {
+
+    },
+    "Enter the OAuth client again for %@." : {
+
+    },
+    "Every switch restarts Claude. Both are off until you turn them on." : {
+
+    },
+    "Getting Claude ready for another account" : {
+
+    },
+    "Kept in sync" : {
+
+    },
+    "Missing" : {
+
+    },
+    "Most room left" : {
+
+    },
+    "Most set up" : {
+
+    },
+    "Moves Claude to an account whose weekly limit resets within a day, mostly unused. Waits until no chat has been active for 15 minutes." : {
+
+    },
+    "Moves Claude to the account with the most room left." : {
+
+    },
+    "Nearly full at" : {
+
+    },
+    "Needs sign-in" : {
+
+    },
+    "No Accounts Yet" : {
+
+    },
+    "Not done: %@." : {
+
+    },
+    "Not offered to this account" : {
+
+    },
+    "Nothing left to copy." : {
+
+    },
+    "Off" : {
+
+    },
+    "Open" : {
+
+    },
+    "Open Claude Switcher" : {
+
+    },
+    "Open at Login" : {
+
+    },
+    "Other accounts show which of its connectors, skills and plugins they lack." : {
+
+    },
+    "Panel preview" : {
+
+    },
+    "Plugins" : {
+
+    },
+    "Quit Claude Switcher" : {
+
+    },
+    "Reading claude.ai…" : {
+
+    },
+    "Reference account" : {
+
+    },
+    "Remove" : {
+
+    },
+    "Remove %@?" : {
+
+    },
+    "Remove Account…" : {
+
+    },
+    "Removed %@." : {
+
+    },
+    "Removes the saved sign-in from this Mac. The account itself and its chats stay." : {
+
+    },
+    "Resets %@" : {
+
+    },
+    "Restart Claude" : {
+
+    },
+    "Restarts Claude signed in as %@" : {
+
+    },
+    "Same Claude Code settings everywhere" : {
+
+    },
+    "Saved sign-ins and backups" : {
+
+    },
+    "Session presets, folder permission modes, auto mode and bypass consent, and sidebar sections come along with each switch." : {
+
+    },
+    "Session presets, folder permissions, sidebar sections" : {
+
+    },
+    "Set up %@ like %@: %lld connectors, %lld plugins, %lld skills, %lld tool settings." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Set up %1$@ like %2$@: %3$lld connectors, %4$lld plugins, %5$lld skills, %6$lld tool settings."
+          }
+        }
+      }
+    },
+    "Set up %@ like %@?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Set up %1$@ like %2$@?"
+          }
+        }
+      }
+    },
+    "Set up like %@" : {
+
+    },
+    "Settings" : {
+
+    },
+    "Settings…" : {
+
+    },
+    "Setup" : {
+
+    },
+    "Show in Finder" : {
+
+    },
+    "Sign In…" : {
+
+    },
+    "Sign in to Claude as usual. The account shows up here within a minute." : {
+
+    },
+    "Sign in to Claude as usual. The account shows up here within a minute; then add the next one." : {
+
+    },
+    "Sign in to Claude with the other account" : {
+
+    },
+    "Sign-ins stay encrypted exactly as Claude stored them and only go to api.anthropic.com." : {
+
+    },
+    "Signed in to Claude" : {
+
+    },
+    "Signed out. Add it again." : {
+
+    },
+    "Skills" : {
+
+    },
+    "Start at login: %@" : {
+
+    },
+    "Starting Claude…" : {
+
+    },
+    "Swapping the sign-in…" : {
+
+    },
+    "Switch Claude to %@" : {
+
+    },
+    "Switch to This Account" : {
+
+    },
+    "Switch when nearly full" : {
+
+    },
+    "Switched at %@ to use this account’s week before it resets %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Switched at %1$@ to use this account’s week before it resets %2$@."
+          }
+        }
+      }
+    },
+    "Switched at %@: %@ was nearly full." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Switched at %1$@: %2$@ was nearly full."
+          }
+        }
+      }
+    },
+    "Switched to %@ on its own to use its week before it resets." : {
+
+    },
+    "Switched to %@ on its own: the active account was nearly full." : {
+
+    },
+    "Switched to %@." : {
+
+    },
+    "Switches, new sign-ins and imported chats show up here." : {
+
+    },
+    "Switching to %@" : {
+
+    },
+    "The other accounts are compared with this one." : {
+
+    },
+    "The sign-in has expired. Add the account again." : {
+
+    },
+    "There is no saved sign-in for this account. Add it again." : {
+
+    },
+    "To use it again, add it with Add Account and sign in once more." : {
+
+    },
+    "Unknown account." : {
+
+    },
+    "Upload by hand" : {
+
+    },
+    "Upload…" : {
+
+    },
+    "Usage" : {
+
+    },
+    "Use This Account" : {
+
+    },
+    "Use as Reference Account" : {
+
+    },
+    "Use up expiring weeks" : {
+
+    },
+    "Version %@" : {
+
+    },
+    "Version %@ is available." : {
+
+    },
+    "W" : {
+
+    },
+    "Waiting for the new sign-in…" : {
+
+    },
+    "Week resets %@" : {
+
+    },
+    "Weekly limit" : {
+
+    },
+    "Your current sign-in is kept. Claude restarts on its sign-in screen; sign in there with the other account and Claude Switcher picks it up.\n\nNever use Sign Out in Claude to change accounts: it ends the saved sign-in." : {
+
+    },
+    "api.anthropic.com answered %lld." : {
+
+    },
+    "the last account" : {
+
+    }
+  },
+  "version" : "1.0"
+}

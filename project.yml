@@ -1,0 +1,58 @@
+name: ClaudeSwitcher
+options:
+  bundleIdPrefix: com.elsikora
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: YES
+    OTHER_SWIFT_FLAGS: "-enable-upcoming-feature ExistentialAny -enable-upcoming-feature InternalImportsByDefault -enable-upcoming-feature MemberImportVisibility"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: YES
+    DEAD_CODE_STRIPPING: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+packages:
+  SwitcherCore:
+    path: .
+targets:
+  ClaudeSwitcher:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/ClaudeSwitcher
+      - path: Resources/Localizable.xcstrings
+      - path: Resources/AppIcon.icon
+      - path: LICENSE
+        buildPhase: resources
+      - path: NOTICE
+        buildPhase: resources
+    dependencies:
+      - package: SwitcherCore
+        product: SwitcherCore
+    settings:
+      base:
+        PRODUCT_NAME: Claude Switcher
+        PRODUCT_MODULE_NAME: ClaudeSwitcher
+        EXECUTABLE_NAME: ClaudeSwitcher
+        PRODUCT_BUNDLE_IDENTIFIER: com.elsikora.ClaudeSwitcher
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Claude Switcher
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Based on claude-account-switcher by SnlperStripes (Apache-2.0). Unofficial, not affiliated with Anthropic."
+        INFOPLIST_KEY_NSUserNotificationsUsageDescription: "Tells you when an account's limit resets or nearly runs out."
+    info:
+      path: App/Info.plist
+      properties:
+        SwitcherUpdateRepository: "ElsiKora/Claude-Switcher"
+        CFBundleLocalizations: [en]

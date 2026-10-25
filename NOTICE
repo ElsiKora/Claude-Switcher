@@ -1,0 +1,17 @@
+Claude Switcher
+Copyright 2026 ElsiKora
+A native macOS app for switching the Claude desktop app between accounts.
+Unofficial. Not affiliated with or endorsed by Anthropic.
+
+Claude Switcher is a Swift rewrite of Claude Account Switcher. The file
+layout it relies on, the switch and auto-switch rules, and the chat and
+project import follow that project; the code, the interface and the app
+packaging are new.
+
+Original NOTICE:
+
+Claude Account Switcher
+Copyright 2026 SnlperStripes
+https://github.com/SnlperStripes/claude-account-switcher
+
+This product includes software developed by SnlperStripes.

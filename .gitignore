@@ -1,0 +1,7 @@
+.build/
+build/
+.swiftpm/
+*.xcuserstate
+.DS_Store
+ClaudeSwitcher.xcodeproj/
+App/Info.plist
