@@ -3,7 +3,8 @@ import AppKit
 import SwiftUI
 
 // Claude Switcher logo in the ElsiKora layout: dark tile with the glyph,
-// the name in a purple-to-magenta gradient, a gradient rule below.
+// the name in a purple-to-magenta gradient, a gradient rule below, on a
+// transparent background so it sits on GitHub's light and dark themes.
 let purple = Color(red: 0.45, green: 0.07, blue: 0.83)
 let magenta = Color(red: 0.82, green: 0.11, blue: 0.78)
 let gradient = LinearGradient(colors: [purple, magenta], startPoint: .bottomLeading, endPoint: .topTrailing)
@@ -27,7 +28,7 @@ struct Glyph: View {
 struct Logo: View {
     var body: some View {
         ZStack(alignment: .bottom) {
-            Color.white
+            Color.clear
             HStack(spacing: 90) {
                 RoundedRectangle(cornerRadius: 56, style: .continuous)
                     .fill(Color(white: 0.12))
