@@ -261,7 +261,7 @@
     "Most set up" : {
 
     },
-    "Moves Claude to an account whose weekly limit resets within a day, mostly unused. Waits until no chat has been active for 15 minutes." : {
+    "Moves Claude to an account whose weekly limit resets within a day, mostly unused. Waits until no chat has been active for 15 minutes and no command is running." : {
 
     },
     "Moves Claude to the account with the most room left." : {

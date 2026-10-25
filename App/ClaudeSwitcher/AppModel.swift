@@ -268,7 +268,7 @@ final class AppModel {
         let current = try? desktop.activeAccount()
         active = current
         if current != nil { noteSignIn() }
-        lastChat = ChatSync.lastChatWrite(root: desktop.sessionsRoot)
+        lastChat = ChatSync.lastChatActivity(root: desktop.sessionsRoot, projects: UsageIndex.defaultProjects)
 
         var jobs: [(id: String, isNew: Bool)] = []
         if let current, state.account(current) == nil, now > backoff[current, default: .distantPast] {
@@ -325,7 +325,10 @@ final class AppModel {
             addingSince = nil
             phase = nil
         }
-        if let (target, cause) = Policy.autoTarget(state, active: active, claudeRunning: claudeRunning, lastChat: lastChat, now: now) {
+        // Only "use up expiring weeks" waits for idle chats, so only it needs the process list.
+        let commandRunning = state.spendWeekly && !ClaudeProcess.liveConversations().runningCommands.isEmpty
+        if let (target, cause) = Policy.autoTarget(state, active: active, claudeRunning: claudeRunning, lastChat: lastChat,
+                                                   commandRunning: commandRunning, now: now) {
             await switchTo(target, cause: cause)
         }
         await checkForUpdate()

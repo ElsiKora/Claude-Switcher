@@ -81,8 +81,30 @@ public enum ChatSync {
         }
     }
 
-    /// When any chat entry was last written. Claude rewrites the entry of a
-    /// running chat as it goes, so this tells whether someone is at work.
+    /// When anyone last worked in a chat: the newest write to the chat
+    /// lists in `root` or to a Claude Code transcript in `projects`. Claude
+    /// leaves a chat's list entry alone during a long reply, but Claude Code
+    /// appends every record of it (subagents included) to the transcript.
+    public static func lastChatActivity(root: URL, projects: URL) -> Date? {
+        [lastChatWrite(root: root), lastTranscriptWrite(projects: projects)].compactMap(\.self).max()
+    }
+
+    /// When a transcript under `projects` was last written.
+    public static func lastTranscriptWrite(projects: URL) -> Date? {
+        guard let walker = FileManager.default.enumerator(at: projects, includingPropertiesForKeys: [.contentModificationDateKey]) else {
+            return nil
+        }
+        var last: Date?
+        for case let url as URL in walker where url.pathExtension == "jsonl" {
+            if let d = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+               last.map({ d > $0 }) ?? true {
+                last = d
+            }
+        }
+        return last
+    }
+
+    /// When any chat entry was last written.
     public static func lastChatWrite(root: URL) -> Date? {
         var last: Date?
         for accountDir in Files.subdirectories(of: root) {

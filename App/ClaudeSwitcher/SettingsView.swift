@@ -91,7 +91,7 @@ struct SettingsView: View {
                 Toggle(isOn: Binding(get: { model.state.spendWeekly }, set: { model.setSpendWeekly($0) })) {
                     Label {
                         Text("Use up expiring weeks")
-                        Text("Moves Claude to an account whose weekly limit resets within a day, mostly unused. Waits until no chat has been active for 15 minutes.")
+                        Text("Moves Claude to an account whose weekly limit resets within a day, mostly unused. Waits until no chat has been active for 15 minutes and no command is running.")
                     } icon: {
                         SettingsIcon(systemName: "calendar.badge.clock", color: .purple)
                     }

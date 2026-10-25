@@ -124,8 +124,11 @@ public enum Policy {
         return (account.usage?.current(at: now).peak ?? 0) >= hotAt ? hotEvery : activeEvery
     }
 
-    /// The account to switch to on its own, and why.
-    public static func autoTarget(_ st: SwitcherState, active: String?, claudeRunning: Bool, lastChat: Date?, now: Date) -> (Account, SwitchCause)? {
+    /// The account to switch to on its own, and why. `lastChat` is when
+    /// anyone last worked in a chat, `commandRunning` whether a chat is
+    /// running a shell command (which writes nothing until it ends).
+    public static func autoTarget(_ st: SwitcherState, active: String?, claudeRunning: Bool, lastChat: Date?,
+                                  commandRunning: Bool, now: Date) -> (Account, SwitchCause)? {
         guard claudeRunning, let cur = st.account(active), let usage = cur.usage,
               now.timeIntervalSince(usage.checkedAt) <= activeFresh,
               st.lastSwitch.map({ now.timeIntervalSince($0) >= cooldown }) ?? true
@@ -139,7 +142,7 @@ public enum Policy {
 
         // The active account keeps going while its own week is the one running out.
         let handPaused = st.handSwitch.map { now.timeIntervalSince($0) < handPause } ?? false
-        let chatting = lastChat.map { now.timeIntervalSince($0) < idleFor } ?? false
+        let chatting = commandRunning || (lastChat.map { now.timeIntervalSince($0) < idleFor } ?? false)
         if st.spendWeekly, !handPaused, !chatting, !spendable(cur, st, now: now),
            let best = st.accounts.filter({ usable($0, st, cur: cur, now: now) && spendable($0, st, now: now) })
                .min(by: { ($0.usage!.weeklyReset ?? .distantFuture) < ($1.usage!.weeklyReset ?? .distantFuture) }) {

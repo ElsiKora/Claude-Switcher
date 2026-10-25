@@ -242,7 +242,7 @@ Click an account in the menu bar panel or in the window. The HUD shows each step
 In **Settings → Automatic Switching** you can turn on:
 
 - **Switch when nearly full**: when the active account passes the threshold, Claude Switcher moves to the account with the most room. It only picks an account well below the threshold, and it waits at least 10 minutes between automatic switches.
-- **Use up expiring weeks**: when another account's week resets within a day with half or more left, Claude Switcher moves there once your chats have been idle for 15 minutes. A switch by hand pauses this for 5 hours.
+- **Use up expiring weeks**: when another account's week resets within a day with half or more left, Claude Switcher moves there once your chats have been idle for 15 minutes and no command is running. A switch by hand pauses this for 5 hours.
 
 ### Command Line
 

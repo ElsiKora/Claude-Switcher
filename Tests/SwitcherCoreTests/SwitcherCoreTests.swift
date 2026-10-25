@@ -239,12 +239,12 @@ private func write(_ text: String, _ url: URL) throws {
         var st = SwitcherState()
         st.autoSwitch = true
         st.accounts = [account("A", session: 97, checked: now), account("B", session: 50, checked: now), account("C", session: 20, checked: now)]
-        let target = Policy.autoTarget(st, active: "A", claudeRunning: true, lastChat: nil, now: now)
+        let target = Policy.autoTarget(st, active: "A", claudeRunning: true, lastChat: nil, commandRunning: false, now: now)
         #expect(target?.0.id == "C")
         #expect(target?.1 == .nearlyFull)
-        #expect(Policy.autoTarget(st, active: "A", claudeRunning: false, lastChat: nil, now: now) == nil)
+        #expect(Policy.autoTarget(st, active: "A", claudeRunning: false, lastChat: nil, commandRunning: false, now: now) == nil)
         st.lastSwitch = now.addingTimeInterval(-60)
-        #expect(Policy.autoTarget(st, active: "A", claudeRunning: true, lastChat: nil, now: now) == nil)
+        #expect(Policy.autoTarget(st, active: "A", claudeRunning: true, lastChat: nil, commandRunning: false, now: now) == nil)
     }
 
     @Test func spendWeeklyWaitsForIdleChats() {
@@ -253,8 +253,9 @@ private func write(_ text: String, _ url: URL) throws {
         st.spendWeekly = true
         st.accounts = [account("A", session: 10, weekly: 70, checked: now),
                        account("B", session: 0, weekly: 20, weeklyReset: now.addingTimeInterval(3600), checked: now)]
-        #expect(Policy.autoTarget(st, active: "A", claudeRunning: true, lastChat: now.addingTimeInterval(-60), now: now) == nil)
-        #expect(Policy.autoTarget(st, active: "A", claudeRunning: true, lastChat: now.addingTimeInterval(-3600), now: now)?.1 == .spendWeekly)
+        #expect(Policy.autoTarget(st, active: "A", claudeRunning: true, lastChat: now.addingTimeInterval(-60), commandRunning: false, now: now) == nil)
+        #expect(Policy.autoTarget(st, active: "A", claudeRunning: true, lastChat: now.addingTimeInterval(-3600), commandRunning: true, now: now) == nil)
+        #expect(Policy.autoTarget(st, active: "A", claudeRunning: true, lastChat: now.addingTimeInterval(-3600), commandRunning: false, now: now)?.1 == .spendWeekly)
     }
 
     @Test func suggestionNeedsClearlyMoreRoom() {

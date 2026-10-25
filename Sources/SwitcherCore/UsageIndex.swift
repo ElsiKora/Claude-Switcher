@@ -68,7 +68,10 @@ public actor UsageIndex {
     private var cache: Cache
     private var loaded = false
 
-    public init(projects: URL = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/projects"), cacheURL: URL) {
+    /// Where Claude Code keeps its transcripts.
+    public static let defaultProjects = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".claude/projects")
+
+    public init(projects: URL = UsageIndex.defaultProjects, cacheURL: URL) {
         self.projects = projects
         self.cacheURL = cacheURL
         cache = Cache()
