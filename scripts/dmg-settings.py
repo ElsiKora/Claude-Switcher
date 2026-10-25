@@ -10,7 +10,7 @@ filesystem = "APFS"
 files = [app]
 symlinks = {"Applications": "/Applications"}
 icon = os.path.join(app, "Contents", "Resources", "AppIcon.icns")
-hide_extensions = [os.path.basename(app)]
+# No hide_extensions: it sets a Finder flag on the bundle, which `codesign --strict` rejects.
 
 # 400 points of content under a 28-point title bar.
 window_rect = ((200, 160), (660, 428))
