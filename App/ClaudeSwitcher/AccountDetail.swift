@@ -15,6 +15,14 @@ struct AccountDetail: View {
         Form {
             Section {
                 header
+                if !account.runsClaudeCode {
+                    Label {
+                        Text("Not in rotation")
+                        Text("This account is on the free plan, and Claude Code needs Pro, Max, Team or Enterprise. Claude Switcher shows it and keeps its chats, but never switches to it on its own.")
+                    } icon: {
+                        SettingsIcon(systemName: "nosign", color: .orange)
+                    }
+                }
             }
             Notices()
 
@@ -75,6 +83,13 @@ struct AccountDetail: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(.quaternary, in: .capsule)
+                    } else if !account.runsClaudeCode {
+                        Text("Free")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.orange.opacity(0.15), in: .capsule)
                     }
                 }
                 if !account.email.isEmpty, account.email != account.displayName {

@@ -29,6 +29,8 @@ enum Demo {
             account("a1", "Alex Rivera", "alex@example.com", "Max", 82, 61, sessionIn: 1.5, weekIn: 70),
             account("a2", "Studio", "studio@example.com", "Max", 8, 23, sessionIn: 4, weekIn: 30),
             account("a3", "Side project", "side@example.com", "Pro", 47, 91, sessionIn: 2, weekIn: 110),
+            // A free account: shown, never rotated to.
+            account("a4", "Old free", "free@example.com", "", 0, 0, sessionIn: 5, weekIn: 160),
         ]
         st.accounts[0].usage?.extra = ExtraUsage(enabled: true, usedCents: 4_210, limitCents: 20_000, currency: "USD")
         st.accounts[1].usage?.extra = ExtraUsage(enabled: false, usedCents: nil, limitCents: nil, currency: nil)

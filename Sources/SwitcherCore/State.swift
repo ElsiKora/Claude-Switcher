@@ -24,6 +24,10 @@ public struct Account: Codable, Sendable, Identifiable, Equatable {
     }
 
     public var displayName: String { name.isEmpty ? email : name }
+
+    /// Whether the account has a plan Claude Code runs on (Pro, Max, Team,
+    /// Enterprise). One without (the free plan) is shown, never rotated to.
+    public var runsClaudeCode: Bool { !plan.isEmpty || (orgs?.count ?? 0) > 1 }
 }
 
 /// A workspace of an account on claude.ai, with limits of its own.
@@ -67,6 +71,9 @@ public struct Seat: Identifiable, Sendable, Equatable {
     public var usage: Usage?
     public var problem: String?
     public var excluded: Bool
+
+    /// Workspaces listed in `orgs` all have a Claude Code plan.
+    public var runsClaudeCode: Bool { org != nil || account.runsClaudeCode }
 
     /// "<account>/<org>": limits belong to an account in a workspace.
     public var id: String { Self.key(account.id, orgID) }
@@ -367,7 +374,8 @@ public enum Policy {
     public static func suggestion(_ st: SwitcherState, active: String?, now: Date) -> Seat? {
         let curPeak = st.seat(active)?.usage?.current(at: now).peak ?? 0
         let candidates = st.seats.filter { a in
-            a.id != active && a.problem == nil && !a.excluded && a.usage.map { now.timeIntervalSince($0.checkedAt) <= idleFresh } == true
+            a.id != active && a.problem == nil && !a.excluded && a.runsClaudeCode
+                && a.usage.map { now.timeIntervalSince($0.checkedAt) <= idleFresh } == true
         }
         guard let best = candidates.min(by: { $0.usage!.current(at: now).peak < $1.usage!.current(at: now).peak }),
               best.usage!.current(at: now).peak <= curPeak - headroom
@@ -376,7 +384,8 @@ public enum Policy {
     }
 
     static func usable(_ a: Seat, _ st: SwitcherState, cur: Seat, now: Date) -> Bool {
-        guard a.id != cur.id, a.problem == nil, !a.excluded, let u = a.usage, now.timeIntervalSince(u.checkedAt) <= idleFresh else {
+        guard a.id != cur.id, a.problem == nil, !a.excluded, a.runsClaudeCode, let u = a.usage,
+              now.timeIntervalSince(u.checkedAt) <= idleFresh else {
             return false
         }
         // Below the threshold with room to spare, so never one that is

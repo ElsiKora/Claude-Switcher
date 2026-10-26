@@ -132,7 +132,7 @@ final class AppModel {
 
     /// The account and workspace with the most of its limits left, signed in or not.
     var roomiest: Seat? {
-        state.seats.filter { $0.problem == nil && !$0.excluded && hasSignIn($0.account) && $0.usage != nil }
+        state.seats.filter { $0.problem == nil && !$0.excluded && $0.runsClaudeCode && hasSignIn($0.account) && $0.usage != nil }
             .min { ($0.usage!.current(at: now).peak) < ($1.usage!.current(at: now).peak) }
     }
 
@@ -565,17 +565,20 @@ final class AppModel {
         }
     }
 
-    /// The workspace Claude has open, for an account with several: claude.ai's
-    /// `lastActiveOrg` cookie in Claude's own cookie store. A switch made in
-    /// Claude itself shows up here too.
+    /// The workspace Claude has open: claude.ai's `lastActiveOrg` cookie in
+    /// Claude's own cookie store. A switch made in Claude itself shows up
+    /// here too, also for an account with one workspace the switcher counts
+    /// (its chats live in that workspace's folder).
     private func noteActiveOrg() async {
-        guard let account = activeAccount, let orgs = account.orgs, orgs.count > 1 else { return }
+        guard let account = activeAccount else { return }
         let store = engine.desktop.cookieFiles[0]
         guard let org = try? await Task.detached(operation: { try ClaudeWeb.cookie("lastActiveOrg", in: store) }).value,
-              org != account.org, orgs.contains(where: { $0.id == org }) else { return }
+              org != account.org, account.orgs.map({ $0.contains { $0.id == org } }) ?? true else { return }
         state.update(account.id) { a in
             a.org = org
-            a.usage = a.orgs?.first { $0.id == org }?.usage
+            // With several workspaces, each one's limits are known; with one,
+            // the next check reads the newly open workspace's.
+            if let orgs = a.orgs { a.usage = orgs.first { $0.id == org }?.usage } else { a.usage = nil }
         }
         save()
     }

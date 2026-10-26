@@ -229,7 +229,7 @@ private func write(_ text: String, _ url: URL) throws {
 
 @Suite struct PolicyTests {
     private func account(_ id: String, session: Double, weekly: Double = 0, weeklyReset: Date? = nil, checked: Date) -> Account {
-        var a = Account(profile: Profile(accountID: id, organizationID: "o", name: id, email: "", plan: ""))
+        var a = Account(profile: Profile(accountID: id, organizationID: "o", name: id, email: "", plan: "Max"))
         a.usage = Usage(session: session, sessionReset: nil, weekly: weekly, weeklyReset: weeklyReset, checkedAt: checked)
         return a
     }
@@ -248,6 +248,10 @@ private func write(_ text: String, _ url: URL) throws {
         st.accounts[1].usage?.session = 40
         st.accounts[1].usage?.sessionReset = now.addingTimeInterval(1800)
         #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, now: now))?.0.account.id == "B")
+        // A free account is never rotated to.
+        st.accounts[1].plan = ""
+        #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, now: now))?.0.account.id == "C")
+        st.accounts[1].plan = "Max"
         // Paused: nothing moves.
         st.pausedUntil = now.addingTimeInterval(600)
         #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, now: now)) == nil)

@@ -82,11 +82,15 @@ public struct ClaudeWeb: Sendable {
 
     // MARK: - Workspaces
 
-    /// The account's workspaces with Claude (chat), from claude.ai: its own
-    /// plan and the teams it belongs to. API-only organizations are left out.
+    /// The account's workspaces with a plan Claude Code runs on, from
+    /// claude.ai: its own Pro or Max plan and the Team or Enterprise
+    /// workspaces it belongs to. A free personal workspace and API-only
+    /// organizations are left out: Claude Code has no limits there to use.
     public func orgs() async throws -> [Org] {
         try await list("/api/organizations").compactMap { o in
-            guard let id = o["uuid"] as? String, (o["capabilities"] as? [String])?.contains("chat") == true else { return nil }
+            let capabilities = o["capabilities"] as? [String] ?? []
+            guard let id = o["uuid"] as? String, capabilities.contains("chat"),
+                  !Set(capabilities).isDisjoint(with: ["claude_pro", "claude_max", "raven"]) else { return nil }
             let raven = o["raven_type"] as? String
             let kind: Org.Kind = raven == "enterprise" ? .enterprise : raven == nil ? .personal : .team
             return Org(id: id, name: o["name"] as? String ?? "", kind: kind)

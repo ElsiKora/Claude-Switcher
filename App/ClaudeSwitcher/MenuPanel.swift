@@ -220,11 +220,13 @@ struct PanelAccountRow: View {
             .background(hovering && canSwitch ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
+        .opacity(seat.runsClaudeCode ? 1 : 0.55)
         .onHover { hovering = $0 }
         .help(canSwitch ? "Switch Claude to \(seat.displayName)" : "")
     }
 
     private var subtitle: String {
+        if !seat.runsClaudeCode { return String(localized: "Free plan · not in rotation") }
         if let problem = seat.problem { return problem }
         if !model.hasSignIn(seat.account) { return String(localized: "Add it again to sign in") }
         return String(localized: "5-hour \(percentText(usage?.session)) · Week \(percentText(usage?.weekly))")

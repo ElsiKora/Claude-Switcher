@@ -109,6 +109,9 @@ struct AccountRow: View {
 
     /// "Active", or its limits; with the workspace open for an account that has several.
     private var rowSubtitle: String {
+        if !account.runsClaudeCode {
+            return account.id == model.active ? String(localized: "Active · free plan") : String(localized: "Free plan · not in rotation")
+        }
         let state = account.id == model.active ? String(localized: "Active") : usageSummary(account, now: model.now)
         guard let org = account.orgs?.first(where: { $0.id == account.org }), (account.orgs?.count ?? 0) > 1 else { return state }
         return "\(state) · \(org.label)"
