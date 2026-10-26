@@ -42,10 +42,18 @@ enum Demo {
         // Extra usage billed to Alex Rivera over the last days, month to date as claude.ai reports it.
         var monthToDate = 0.0
         for daysAgo in stride(from: 9, through: 0, by: -1) {
-            monthToDate += [0, 120, 0, 340, 80, 0, 510, 260, 0, 380][9 - daysAgo]
+            // Matches the extra-usage spans below: billed at API prices.
+            monthToDate += [0, 0, 0, 0, 0, 2240, 4000, 0, 0, 0][9 - daysAgo]
             st.extraByDay["a1", default: [:]][ExtraLedger.dayKey(now.addingTimeInterval(-Double(daysAgo) * 86_400))] = monthToDate
         }
         st.accounts[0].usage?.extra?.usedCents = monthToDate
+        // Alex Rivera ran past its plan for part of a few days.
+        var track = ExtraTrack(at: now.addingTimeInterval(-9 * 86_400), amount: 0)
+        track.spans = [
+            DateInterval(start: now.addingTimeInterval(-4 * 86_400 + 9 * 3600), duration: 5 * 3600),
+            DateInterval(start: now.addingTimeInterval(-3 * 86_400 + 13 * 3600), duration: 7 * 3600),
+        ]
+        st.extraTracks["a1"] = track
         return st
     }()
 
@@ -76,7 +84,7 @@ enum Demo {
                 t.write5m = replies * Int.random(in: 500...3_000, using: &generator)
                 t.write1h = replies * Int.random(in: 0...1_500, using: &generator)
                 let chat = "demo-\(Int.random(in: 0..<chatTitles.count, using: &generator))"
-                let bucket = UsageBucket(hour: nowHour - hoursAgo, model: model, fast: false, longPrompt: false, conversation: chat)
+                let bucket = UsageBucket(slot: (nowHour - hoursAgo) * 4, model: model, fast: false, longPrompt: false, conversation: chat)
                 out[bucket, default: Tokens()] = out[bucket, default: Tokens()] + t
             }
         }

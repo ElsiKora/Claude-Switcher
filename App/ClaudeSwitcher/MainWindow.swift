@@ -12,12 +12,15 @@ enum SidebarItem: Hashable {
 /// The main window, laid out like System Settings: accounts in the sidebar,
 /// a grouped form on the right.
 struct MainWindow: View {
+    /// The scene id. "main" until 0.2.1; renamed so a window size left over
+    /// from then is not restored.
+    static let id = "accounts"
+
     @Environment(AppModel.self) private var model
-    @State private var selection: SidebarItem?
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selection) {
+            List(selection: Binding(get: { model.selection }, set: { model.selection = $0 })) {
                 Section("Accounts") {
                     ForEach(model.sortedAccounts) { account in
                         AccountRow(account: account)
@@ -69,7 +72,7 @@ struct MainWindow: View {
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
         } detail: {
-            switch selection ?? defaultSelection {
+            switch model.selection ?? defaultSelection {
             case let .account(id):
                 if let account = model.state.account(id) {
                     AccountDetail(account: account)
@@ -94,7 +97,7 @@ struct MainWindow: View {
         }
         .task {
             // Before the refresh: its first keychain read can wait on the user.
-            if selection == nil { selection = Demo.initialSelection ?? defaultSelection }
+            if model.selection == nil { model.selection = Demo.initialSelection ?? defaultSelection }
             await model.refresh()
         }
     }

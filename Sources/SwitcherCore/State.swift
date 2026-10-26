@@ -63,6 +63,8 @@ public struct SwitcherState: Codable, Sendable, Equatable {
     /// What claude.ai had billed beyond each plan by the end of each day:
     /// account id → "yyyy-MM-dd" → amount in minor units, as last read that day.
     public var extraByDay: [String: [String: Double]] = [:]
+    /// When each account was being charged for extra usage.
+    public var extraTracks: [String: ExtraTrack] = [:]
 
     public init() {}
 
@@ -99,6 +101,7 @@ public struct SwitcherState: Codable, Sendable, Equatable {
         holdChats = try c.decodeIfPresent(Bool.self, forKey: .holdChats) ?? d.holdChats
         heldChats = try c.decodeIfPresent([String].self, forKey: .heldChats) ?? d.heldChats
         extraByDay = try c.decodeIfPresent([String: [String: Double]].self, forKey: .extraByDay) ?? d.extraByDay
+        extraTracks = try c.decodeIfPresent([String: ExtraTrack].self, forKey: .extraTracks) ?? d.extraTracks
     }
 }
 

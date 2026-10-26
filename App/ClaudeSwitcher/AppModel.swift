@@ -98,6 +98,8 @@ final class AppModel {
         } else {
             engine = SwitchEngine()
             state = engine.store.loadState()
+            // Read from Claude's config, no keychain: the window opens on the signed-in account.
+            active = try? engine.desktop.activeAccount()
             activity = Self.loadActivity(engine.store)
         }
     }
@@ -301,6 +303,11 @@ final class AppModel {
                 if let extra = usage.extra, extra.enabled, let used = extra.usedCents {
                     // claude.ai reports the month so far; keeping the last amount of each day gives the days.
                     state.extraByDay[job.id, default: [:]][ExtraLedger.dayKey(now)] = used
+                    if state.extraTracks[job.id] == nil {
+                        state.extraTracks[job.id] = ExtraTrack(at: now, amount: used)
+                    } else {
+                        state.extraTracks[job.id]?.record(used, at: now)
+                    }
                 }
                 if let account = state.account(job.id) { notifier.usageChanged(account, from: before, to: usage, model: self) }
                 strikes[job.id] = nil
@@ -438,6 +445,15 @@ final class AppModel {
     }
     func setMirrorSettings(_ on: Bool) { state.mirrorSettings = on; save() }
     func setReference(_ id: String?) { state.reference = id; save() }
+
+    /// The page the main window shows; the app menu's Settings… opens it on Settings.
+    var selection: SidebarItem?
+
+    /// Claude Switcher → Settings… (⌘,): the window's own Settings page, not a second window.
+    func showSettings() {
+        selection = .settings
+        showMainWindow?()
+    }
 
     /// A claude.ai page open inside Claude Switcher, as one account.
     var claudeAIPage: ClaudeAIPage?

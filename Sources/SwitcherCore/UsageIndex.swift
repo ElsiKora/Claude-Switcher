@@ -25,10 +25,13 @@ public struct Tokens: Codable, Sendable, Equatable {
     }
 }
 
-/// One hour of one model's use in one conversation.
+/// A quarter of an hour of one model's use in one conversation. A quarter,
+/// not an hour, so a switch mid-hour counts each side for its own account.
 public struct UsageBucket: Codable, Sendable, Hashable {
-    /// Hours since 1970.
-    public var hour: Int
+    public static let length: TimeInterval = 15 * 60
+
+    /// Quarter hours since 1970.
+    public var slot: Int
     public var model: String
     public var fast: Bool
     /// Requests priced as long prompts (`Pricing.isLongPrompt`).
@@ -37,13 +40,17 @@ public struct UsageBucket: Codable, Sendable, Hashable {
     /// subagent's work counts for the conversation that ran it).
     public var conversation: String
 
-    public init(hour: Int, model: String, fast: Bool, longPrompt: Bool, conversation: String) {
-        self.hour = hour
+    public init(slot: Int, model: String, fast: Bool, longPrompt: Bool, conversation: String) {
+        self.slot = slot
         self.model = model
         self.fast = fast
         self.longPrompt = longPrompt
         self.conversation = conversation
     }
+
+    public static func slot(_ date: Date) -> Int { Int(date.timeIntervalSince1970 / length) }
+
+    public var date: Date { Date(timeIntervalSince1970: Double(slot) * Self.length) }
 }
 
 /// Reads token usage out of the Claude Code transcripts in
@@ -59,7 +66,7 @@ public actor UsageIndex {
     }
 
     struct Cache: Codable {
-        var version = 2
+        var version = 3
         var files: [String: FileState] = [:]
     }
 
@@ -167,7 +174,7 @@ public actor UsageIndex {
             let split = usage["cache_creation"] as? [String: Any]
             t.write1h = min(split?["ephemeral_1h_input_tokens"] as? Int ?? 0, writes)
             t.write5m = writes - t.write1h
-            let bucket = UsageBucket(hour: Int(date.timeIntervalSince1970 / 3600), model: model,
+            let bucket = UsageBucket(slot: UsageBucket.slot(date), model: model,
                                      fast: usage["speed"] as? String == "fast",
                                      longPrompt: Pricing.isLongPrompt(model: model, promptTokens: t.input + t.cacheRead + writes),
                                      conversation: conversation)

@@ -21,7 +21,8 @@ struct AnalyticsView: View {
 
     var body: some View {
         let insights = model.insights
-        let report = insights.report(range, timeline: model.timeline, filter: UsageFilter(accounts: accounts, models: models))
+        let report = insights.report(range, timeline: model.timeline, filter: UsageFilter(accounts: accounts, models: models),
+                                     extra: model.state.extraTracks)
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header(insights, report)
@@ -32,7 +33,7 @@ struct AnalyticsView: View {
                     modelsCard(report)
                     accountsCard(report)
                 }
-                billedCard
+                planCard(report)
                 chatsCard(report)
                 Text("\(Pricing.source). Counts every Claude Code reply in ~/.claude/projects, subagents included; replies with the same message id count once. The API value is what the same tokens would cost through the API, not what the subscription charges. Usage counts for the account Claude was signed in to at the time; before Claude Switcher\u{2019}s first switch, for the account whose chat list held the chat. Unattributed is usage no account can be named for: terminal sessions, deleted chats, and chats from before Claude Switcher that no account\u{2019}s list kept.")
                     .font(.footnote)
@@ -49,26 +50,45 @@ struct AnalyticsView: View {
     // MARK: - Header and filters
 
     private func header(_ insights: Insights, _ r: UsageReport) -> some View {
-        HStack(spacing: 12) {
-            Picker("Range", selection: $range) {
-                ForEach(Insights.Range.allCases) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 340)
+        let range = Picker("Range", selection: $range) {
+            ForEach(Insights.Range.allCases) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        let filters = HStack(spacing: 8) {
             filterMenu(title: accountsTitle(r), symbol: "person.2", all: r.accountsSeen, selection: $accounts, name: accountName)
             filterMenu(title: modelsTitle(r), symbol: "cpu", all: r.modelsSeen, selection: $models, name: { $0 })
-            Spacer()
+        }
+        let status = HStack(spacing: 8) {
             if let progress = insights.progress {
-                ProgressView(value: progress).frame(width: 100)
+                ProgressView(value: progress).frame(width: 80)
                 Text("Reading transcripts \(Int(progress * 100))%")
                     .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
             } else if let at = insights.updatedAt {
-                Text("Updated \(at.formatted(date: .omitted, time: .shortened))").font(.callout).foregroundStyle(.secondary)
+                Text("Updated \(at.formatted(date: .omitted, time: .shortened))")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
             Button { Task { await insights.refresh(model) } } label: { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(.borderless)
                 .help("Read new transcripts")
+        }
+        // One row when it fits; on a narrow window the status moves under the controls.
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { range; filters; Spacer(minLength: 12); status }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) { range; Spacer(minLength: 12); status }
+                filters
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                range
+                filters
+                status
+            }
         }
     }
 
@@ -117,7 +137,10 @@ struct AnalyticsView: View {
     private func tiles(_ r: UsageReport) -> some View {
         let t = r.total
         let all = [
-            Tile(title: "API value", value: dollars(t.cost), detail: String(localized: "What these tokens cost through the API"),
+            Tile(title: "API value", value: dollars(t.cost),
+                 detail: r.extraSince.isEmpty
+                     ? String(localized: "What these tokens cost through the API")
+                     : String(localized: "\(dollars(t.planCost)) from plans · \(dollars(t.extraCost)) as extra usage"),
                  symbol: "dollarsign.circle.fill", color: .green),
             Tile(title: "Tokens", value: compact(t.tokens.total),
                  detail: String(localized: "\(compact(t.tokens.input + t.tokens.write5m + t.tokens.write1h)) in · \(compact(t.tokens.output)) out · \(compact(t.tokens.cacheRead)) cached"),
@@ -240,14 +263,19 @@ struct AnalyticsView: View {
                 }
                 TableColumn("Replies", value: \.replies) { item in number(item.replies.formatted()) }
                     .width(min: 50, ideal: 58)
-                TableColumn("Input", value: \.input) { item in number(compact(item.input)) }
-                    .width(min: 45, ideal: 52)
-                TableColumn("Output", value: \.output) { item in number(compact(item.output)) }
-                    .width(min: 45, ideal: 52)
-                TableColumn("Cached", value: \.cacheRead) { item in number(compact(item.cacheRead)) }
-                    .width(min: 55, ideal: 64)
+                TableColumn("Tokens", value: \.tokens) { item in
+                    number(compact(item.tokens))
+                        .help(String(localized: "\(compact(item.input)) in · \(compact(item.output)) out · \(compact(item.cacheRead)) cached"))
+                }
+                .width(min: 50, ideal: 60)
                 TableColumn("API Value", value: \.cost) { item in number(dollars(item.cost)).fontWeight(.medium) }
                     .width(min: 60, ideal: 70)
+                TableColumn("From Plan", value: \.planCost) { item in
+                    number(item.tracked ? dollars(item.planCost) : "–")
+                        .foregroundStyle(item.tracked ? .primary : .tertiary)
+                        .help("What the plan covered, at API prices. The rest was charged as extra usage.")
+                }
+                .width(min: 60, ideal: 72)
                 TableColumn("Extra Billed", value: \.billedSort) { item in
                     number(item.billed).foregroundStyle(item.billedSort > 0 ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
                 }
@@ -282,7 +310,7 @@ struct AnalyticsView: View {
             let titles = Dictionary(model.insights.chats.map { ($0.conversation, $0.title) }, uniquingKeysWith: { a, _ in a })
             return r.byConversationInRange.map { id, total in
                 BreakdownItem(id: id, day: .distantPast, name: titles[id] ?? String(localized: "Terminal or deleted chat"),
-                              account: "", model: "", total: total, billed: [:])
+                              account: "", model: "", total: total, billed: [:], tracked: !r.extraSince.isEmpty)
             }
         }
         struct Key: Hashable { var day: Date?; var account: String?; var model: String? }
@@ -300,10 +328,15 @@ struct AnalyticsView: View {
                 for (currency, value) in amounts { money[currency, default: 0] += value }
             }
             let name = key.account.map(accountName) ?? (key.model ?? String(localized: "All"))
+            // The split is known from the first usage check that saw extra usage on,
+            // and always for an account with extra usage off: its plan covered everything.
+            let since = key.account.map { r.extraSince[$0] } ?? r.extraSince.values.min()
+            let tracked = key.account.map(planOnly) ?? false
+                || since.map { s in key.day.map { $0.addingTimeInterval(86_400) > s } ?? true } ?? false
             return BreakdownItem(
                 id: "\(key.day?.timeIntervalSince1970 ?? 0)|\(key.account ?? "")|\(key.model ?? "")",
                 day: key.day ?? .distantPast, name: name, account: key.account ?? "",
-                model: key.model ?? (group == .model ? name : "–"), total: total, billed: money)
+                model: key.model ?? (group == .model ? name : "–"), total: total, billed: money, tracked: tracked)
         }
     }
 
@@ -359,34 +392,57 @@ struct AnalyticsView: View {
         return line
     }
 
-    /// What claude.ai billed beyond each plan this month, in the account's currency.
-    @ViewBuilder private var billedCard: some View {
-        let rows = model.sortedAccounts.compactMap { a -> (Account, ExtraUsage)? in
-            guard let extra = a.usage?.extra else { return nil }
-            return (a, extra)
-        }
-        if !rows.isEmpty {
-            Card(title: "Billed Beyond the Plan (this month)") {
-                ForEach(rows, id: \.0.id) { account, extra in
-                    HStack(spacing: 10) {
-                        AccountRings(account: account, size: 26)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(account.displayName)
-                            Text(extra.enabled
-                                 ? (extra.limit.map { String(localized: "Extra usage on, limit \(money($0, extra.currency))") } ?? String(localized: "Extra usage on, no monthly limit"))
-                                 : String(localized: "Extra usage off"))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Text(extra.enabled ? money(extra.used ?? 0, extra.currency) : "–")
+    /// Per account: what its plan covered and what went to paid extra usage,
+    /// at API prices, next to what claude.ai actually billed this month.
+    private func planCard(_ r: UsageReport) -> some View {
+        let ids = Set(r.byAccount.keys.filter { model.state.account($0) != nil })
+            .union(model.accounts.filter { $0.usage?.extra?.enabled == true }.map(\.id))
+        let rows = model.sortedAccounts.filter { ids.contains($0.id) }
+        return Card(title: "Plan and Extra Usage") {
+            ForEach(rows) { account in
+                let total = r.byAccount[account.id] ?? UsageTotal()
+                let extra = account.usage?.extra
+                HStack(spacing: 10) {
+                    AccountRings(account: account, size: 26)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(account.displayName)
+                        Text(planLine(account, total, r))
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(extra?.enabled == true ? money(extra?.used ?? 0, extra?.currency) : "–")
                             .monospacedDigit().fontWeight(.semibold)
-                            .foregroundStyle((extra.used ?? 0) > 0 ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                            .foregroundStyle((extra?.used ?? 0) > 0 ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                        Text(extra?.enabled == true ? String(localized: "billed this month") : String(localized: "extra usage off"))
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Text("Charged by Anthropic at API prices once a plan\u{2019}s limits run out, as claude.ai reports it.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
+            Text(planNote(r))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// An account claude.ai cannot charge beyond its plan: extra usage is off.
+    private func planOnly(_ id: String) -> Bool {
+        model.state.account(id)?.usage?.extra.map { !$0.enabled } ?? false
+    }
+
+    private func planLine(_ account: Account, _ total: UsageTotal, _ r: UsageReport) -> String {
+        let value = String(localized: "\(dollars(total.cost)) API value")
+        if planOnly(account.id) { return value + " · " + String(localized: "all from the plan") }
+        guard r.extraSince[account.id] != nil else { return value }
+        return value + " · " + String(localized: "\(dollars(total.planCost)) from the plan · \(dollars(total.extraCost)) as extra usage")
+    }
+
+    private func planNote(_ r: UsageReport) -> String {
+        let since = r.extraSince.values.min().map { String(localized: "since \($0.formatted(date: .abbreviated, time: .shortened))") }
+        let split = since.map { String(localized: "The split into plan and extra usage is known \($0): Claude Switcher marks the times claude.ai\u{2019}s extra-usage charges grew, and usage at those times counts as paid.") }
+            ?? String(localized: "The split into plan and extra usage starts with the next usage check of an account with extra usage on.")
+        return String(localized: "API value is what the tokens would cost through the API; billed is real money, in each account\u{2019}s currency, as claude.ai reports it for the calendar month (pick This Month to compare). ") + split
     }
 
     private func chatsCard(_ r: UsageReport) -> some View {
@@ -419,11 +475,16 @@ struct BreakdownItem: Identifiable {
     let input: Int
     let output: Int
     let cacheRead: Int
+    let tokens: Int
     let cost: Double
+    let planCost: Double
+    /// Whether the plan and extra split is known for this row.
+    let tracked: Bool
     /// Currency → amount, in major units.
     let billedAmounts: [String: Double]
 
-    init(id: String, day: Date, name: String, account: String, model: String, total: UsageTotal, billed: [String: Double]) {
+    init(id: String, day: Date, name: String, account: String, model: String, total: UsageTotal,
+         billed: [String: Double], tracked: Bool) {
         self.id = id
         self.day = day
         self.name = name
@@ -433,7 +494,10 @@ struct BreakdownItem: Identifiable {
         input = total.tokens.input + total.tokens.write5m + total.tokens.write1h
         output = total.tokens.output
         cacheRead = total.tokens.cacheRead
+        tokens = total.tokens.total
         cost = total.cost
+        planCost = total.planCost
+        self.tracked = tracked
         billedAmounts = billed
     }
 

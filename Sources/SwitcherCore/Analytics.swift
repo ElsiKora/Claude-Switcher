@@ -75,16 +75,23 @@ public struct AccountTimeline: Codable, Sendable, Equatable {
 public struct UsageTotal: Sendable, Equatable {
     public var tokens = Tokens()
     public var cost: Double = 0
+    /// Of `cost`, the part used while claude.ai was charging the account for
+    /// extra usage (see `ExtraTrack`); the rest the plan covered.
+    public var extraCost: Double = 0
     /// Tokens of models the price table does not know.
     public var unpriced = 0
 
     public init() {}
 
-    mutating func add(_ t: Tokens, _ bucket: UsageBucket) {
+    /// What the plan covered, at API prices.
+    public var planCost: Double { cost - extraCost }
+
+    mutating func add(_ t: Tokens, _ bucket: UsageBucket, extra: Bool = false) {
         tokens = tokens + t
         if let c = Pricing.cost(model: bucket.model, input: t.input, output: t.output, cacheRead: t.cacheRead,
                                 cacheWrite5m: t.write5m, cacheWrite1h: t.write1h, fast: bucket.fast, longPrompt: bucket.longPrompt) {
             cost += c
+            if extra { extraCost += c }
         } else {
             unpriced += t.total
         }
@@ -93,6 +100,7 @@ public struct UsageTotal: Sendable, Equatable {
     public mutating func merge(_ other: UsageTotal) {
         tokens = tokens + other.tokens
         cost += other.cost
+        extraCost += other.extraCost
         unpriced += other.unpriced
     }
 
@@ -154,20 +162,24 @@ public struct UsageReport: Sendable {
     public var accountsSeen: Set<String> = []
     public var modelsSeen: Set<String> = []
     public var lastUse: [String: Date] = [:]
+    /// Since when the plan and extra-usage split is known, per account.
+    public var extraSince: [String: Date] = [:]
 
     public init() {}
 
     /// Sums `buckets` that fall in `range`, attributing each to an account
     /// with `timeline` (nil account ids count under "").
     public static func make(_ buckets: [UsageBucket: Tokens], timeline: AccountTimeline, range: ClosedRange<Date>,
-                            filter: UsageFilter = .all, calendar: Calendar = .current) -> UsageReport {
+                            filter: UsageFilter = .all, extra: [String: ExtraTrack] = [:],
+                            calendar: Calendar = .current) -> UsageReport {
         var report = UsageReport()
+        report.extraSince = extra.mapValues(\.since)
         var days: [Date: [String: UsageTotal]] = [:]
         var daysAccount: [Date: [String: UsageTotal]] = [:]
         struct CellKey: Hashable { var day: Date; var account: String; var model: String }
         var cells: [CellKey: UsageTotal] = [:]
         for (bucket, tokens) in buckets {
-            let date = Date(timeIntervalSince1970: Double(bucket.hour) * 3600)
+            let date = bucket.date
             report.byConversation[bucket.conversation, default: UsageTotal()].add(tokens, bucket)
             report.lastUse[bucket.conversation] = max(report.lastUse[bucket.conversation] ?? .distantPast, date)
             guard range.contains(date) else { continue }
@@ -177,13 +189,14 @@ public struct UsageReport: Sendable {
             report.accountsSeen.insert(account)
             report.modelsSeen.insert(model)
             guard filter.includes(account: account, model: model) else { continue }
-            cells[CellKey(day: day, account: account, model: model), default: UsageTotal()].add(tokens, bucket)
-            report.byConversationInRange[bucket.conversation, default: UsageTotal()].add(tokens, bucket)
-            report.total.add(tokens, bucket)
-            report.byModel[model, default: UsageTotal()].add(tokens, bucket)
-            report.byAccount[account, default: UsageTotal()].add(tokens, bucket)
-            days[day, default: [:]][model, default: UsageTotal()].add(tokens, bucket)
-            daysAccount[day, default: [:]][account, default: UsageTotal()].add(tokens, bucket)
+            let paid = extra[account]?.charged(at: date.addingTimeInterval(UsageBucket.length / 2)) ?? false
+            cells[CellKey(day: day, account: account, model: model), default: UsageTotal()].add(tokens, bucket, extra: paid)
+            report.byConversationInRange[bucket.conversation, default: UsageTotal()].add(tokens, bucket, extra: paid)
+            report.total.add(tokens, bucket, extra: paid)
+            report.byModel[model, default: UsageTotal()].add(tokens, bucket, extra: paid)
+            report.byAccount[account, default: UsageTotal()].add(tokens, bucket, extra: paid)
+            days[day, default: [:]][model, default: UsageTotal()].add(tokens, bucket, extra: paid)
+            daysAccount[day, default: [:]][account, default: UsageTotal()].add(tokens, bucket, extra: paid)
         }
         report.daysByModel = days.flatMap { day, models in models.map { Day(day: day, key: $0.key, total: $0.value) } }
             .sorted { ($0.day, $0.key) < ($1.day, $1.key) }
@@ -226,5 +239,52 @@ public enum ExtraLedger {
     /// Since when there are daily amounts: the day after the first one recorded.
     public static func since(_ monthToDate: [String: Double], calendar: Calendar = .current) -> Date? {
         monthToDate.keys.sorted().dropFirst().first.flatMap { day($0, calendar: calendar) }
+    }
+}
+
+/// When claude.ai was charging an account for extra usage, from its
+/// month-to-date amount at each usage check: between two checks where the
+/// amount grew, the account's usage was paid for, not covered by the plan.
+/// Accurate to the time between checks (one to ten minutes).
+public struct ExtraTrack: Codable, Sendable, Equatable {
+    /// The first check; nothing is known before it.
+    public var since: Date
+    public var lastCheck: Date
+    /// Month to date at the last check, in minor units.
+    public var lastAmount: Double
+    public var spans: [DateInterval] = []
+
+    public init(at date: Date, amount: Double) {
+        since = date
+        lastCheck = date
+        lastAmount = amount
+    }
+
+    public mutating func record(_ amount: Double, at date: Date, calendar: Calendar = .current) {
+        guard date > lastCheck else { return }
+        let sameMonth = calendar.isDate(date, equalTo: lastCheck, toGranularity: .month)
+        var start: Date?
+        if sameMonth, amount > lastAmount {
+            start = lastCheck
+        } else if !sameMonth, amount > 0 {
+            start = max(lastCheck, calendar.dateInterval(of: .month, for: date)?.start ?? lastCheck)
+        }
+        if let start {
+            if let last = spans.last, last.end >= start {
+                spans[spans.count - 1] = DateInterval(start: last.start, end: date)
+            } else {
+                spans.append(DateInterval(start: start, end: date))
+            }
+        }
+        lastCheck = date
+        lastAmount = amount
+        // A quarter year is plenty for the analytics.
+        let cutoff = date.addingTimeInterval(-92 * 86_400)
+        spans.removeAll { $0.end < cutoff }
+    }
+
+    /// Whether usage at `date` was charged as extra usage.
+    public func charged(at date: Date) -> Bool {
+        spans.contains { $0.contains(date) }
     }
 }

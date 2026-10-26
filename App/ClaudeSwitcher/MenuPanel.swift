@@ -52,7 +52,7 @@ struct MenuPanel: View {
             VStack(spacing: 0) {
                 AddAccountButton(style: .menuRow)
                 MenuRow("Open Claude Switcher", systemImage: "macwindow") {
-                    openWindow(id: "main")
+                    openWindow(id: MainWindow.id)
                     NSApp.activate()
                 }
                 Divider().padding(.horizontal, 9).padding(.vertical, 5)

@@ -29,15 +29,16 @@ struct ClaudeSwitcherApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Window("Claude Switcher", id: "main") {
+        Window("Claude Switcher", id: MainWindow.id) {
             MainWindow()
                 .environment(model)
         }
         .defaultSize(width: 1040, height: 760)
         .windowResizability(.contentMinSize)
-        // A Dock app: the window opens with it and stays until it is closed;
-        // the menu bar item and Dock icon bring it back.
-        .defaultLaunchBehavior(.presented)
+        // A Dock app: the window opens with it (StatusLabel opens it, so it
+        // keeps its saved size) and stays until it is closed; the menu bar
+        // item and Dock icon bring it back.
+        .defaultLaunchBehavior(.suppressed)
 
         Window("Welcome to Claude Switcher", id: "welcome") {
             WelcomeView()
@@ -61,13 +62,11 @@ struct ClaudeSwitcherApp: App {
                 Button("Check for Updates\u{2026}") { Task { await model.checkForUpdatesNow() } }
                     .disabled(ClaudeSwitcherApp.isDemo)
             }
-        }
-
-        Settings {
-            SettingsView()
-                .environment(model)
-                .frame(width: 520)
-                .fixedSize(horizontal: false, vertical: true)
+            // Settings live in the main window, so ⌘, opens that page instead of a window of their own.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings\u{2026}") { model.showSettings() }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
         }
     }
 }
@@ -94,7 +93,7 @@ struct StatusLabel: View {
             .accessibilityLabel("Claude Switcher")
             .task {
                 delegate.openMainWindow = {
-                    openWindow(id: "main")
+                    openWindow(id: MainWindow.id)
                     NSApp.activate()
                 }
                 model.showMainWindow = delegate.openMainWindow
@@ -103,6 +102,10 @@ struct StatusLabel: View {
                     NSApp.activate()
                 }
                 model.start()
+                // A Dock app shows its window when it starts, restored or not.
+                if !NSApp.windows.contains(where: { $0.isVisible && $0.identifier?.rawValue.hasPrefix(MainWindow.id) == true }) {
+                    openWindow(id: MainWindow.id)
+                }
                 if ClaudeSwitcherApp.isDemo, CommandLine.arguments.contains("--hud") { model.showDemoHUD() }
             }
     }

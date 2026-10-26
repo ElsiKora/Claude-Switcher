@@ -65,7 +65,7 @@ final class Insights {
     }
 
     enum Range: String, CaseIterable, Identifiable {
-        case today = "Today", week = "7 Days", month = "30 Days", all = "All"
+        case today = "Today", week = "7 Days", month = "30 Days", thisMonth = "This Month", all = "All"
         var id: String { rawValue }
 
         var dates: ClosedRange<Date> {
@@ -75,13 +75,16 @@ final class Insights {
             case .today: cal.startOfDay(for: now)...now
             case .week: cal.date(byAdding: .day, value: -6, to: cal.startOfDay(for: now))!...now
             case .month: cal.date(byAdding: .day, value: -29, to: cal.startOfDay(for: now))!...now
+            // The calendar month, the period claude.ai bills extra usage for.
+            case .thisMonth: (cal.dateInterval(of: .month, for: now)?.start ?? now)...now
             case .all: Date.distantPast...now
             }
         }
     }
 
-    func report(_ range: Range, timeline: AccountTimeline, filter: UsageFilter = .all) -> UsageReport {
-        UsageReport.make(buckets, timeline: timeline, range: range.dates, filter: filter)
+    func report(_ range: Range, timeline: AccountTimeline, filter: UsageFilter = .all,
+                extra: [String: ExtraTrack] = [:]) -> UsageReport {
+        UsageReport.make(buckets, timeline: timeline, range: range.dates, filter: filter, extra: extra)
     }
 
     /// Every chat of every account's list, once, with its latest state.
