@@ -55,6 +55,14 @@ public struct SwitcherState: Codable, Sendable, Equatable {
     public var timeline: AccountTimeline?
     public var updateChecked: Date?
     public var latestVersion: String?
+    /// Adding several accounts: restarts keep cut-off chats waiting instead
+    /// of continuing them, until this is turned off on the final account.
+    public var holdChats = false
+    /// Chats waiting to continue (chat ids without `local_`).
+    public var heldChats: [String] = []
+    /// What claude.ai had billed beyond each plan by the end of each day:
+    /// account id → "yyyy-MM-dd" → amount in minor units, as last read that day.
+    public var extraByDay: [String: [String: Double]] = [:]
 
     public init() {}
 
@@ -88,6 +96,9 @@ public struct SwitcherState: Codable, Sendable, Equatable {
         timeline = try c.decodeIfPresent(AccountTimeline.self, forKey: .timeline)
         updateChecked = try c.decodeIfPresent(Date.self, forKey: .updateChecked)
         latestVersion = try c.decodeIfPresent(String.self, forKey: .latestVersion)
+        holdChats = try c.decodeIfPresent(Bool.self, forKey: .holdChats) ?? d.holdChats
+        heldChats = try c.decodeIfPresent([String].self, forKey: .heldChats) ?? d.heldChats
+        extraByDay = try c.decodeIfPresent([String: [String: Double]].self, forKey: .extraByDay) ?? d.extraByDay
     }
 }
 
@@ -129,7 +140,7 @@ public enum Policy {
     /// running a shell command (which writes nothing until it ends).
     public static func autoTarget(_ st: SwitcherState, active: String?, claudeRunning: Bool, lastChat: Date?,
                                   commandRunning: Bool, now: Date) -> (Account, SwitchCause)? {
-        guard claudeRunning, let cur = st.account(active), let usage = cur.usage,
+        guard claudeRunning, !st.holdChats, let cur = st.account(active), let usage = cur.usage,
               now.timeIntervalSince(usage.checkedAt) <= activeFresh,
               st.lastSwitch.map({ now.timeIntervalSince($0) >= cooldown }) ?? true
         else { return nil }

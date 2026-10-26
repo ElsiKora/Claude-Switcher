@@ -20,13 +20,15 @@ enum Phase: Equatable {
     case adding
     case waitingForSignIn
     case importing
+    /// Adding several accounts is over: held chats continue.
+    case continuing
 
     var steps: [Step] {
         switch self {
         case .switching: [.quit, .swap, .chats, .launch]
         case .adding: [.quit, .swap, .launch]
         case .waitingForSignIn: [.signIn]
-        case .importing: [.quit, .chats, .launch]
+        case .importing, .continuing: [.quit, .chats, .launch]
         }
     }
 
@@ -296,6 +298,10 @@ final class AppModel {
                 let usage = try await api.usage(token: token)
                 let before = state.account(job.id)?.usage
                 state.update(job.id) { $0.usage = usage; $0.problem = nil }
+                if let extra = usage.extra, extra.enabled, let used = extra.usedCents {
+                    // claude.ai reports the month so far; keeping the last amount of each day gives the days.
+                    state.extraByDay[job.id, default: [:]][ExtraLedger.dayKey(now)] = used
+                }
                 if let account = state.account(job.id) { notifier.usageChanged(account, from: before, to: usage, model: self) }
                 strikes[job.id] = nil
             } catch let APIError.rateLimited(after) {
@@ -433,6 +439,26 @@ final class AppModel {
     func setMirrorSettings(_ on: Bool) { state.mirrorSettings = on; save() }
     func setReference(_ id: String?) { state.reference = id; save() }
 
+    /// A claude.ai page open inside Claude Switcher, as one account.
+    var claudeAIPage: ClaudeAIPage?
+
+    /// Opens claude.ai's Connectors page as `account`, to sign in to connectors
+    /// there. Its setup is read again once the page is closed.
+    func connect(_ account: Account) {
+        claudeAIPage = ClaudeAIPage(account: account, path: "/settings/connectors")
+    }
+
+    func closeClaudeAIPage() {
+        claudeAIPage = nil
+        Task { await refreshCloudSetups(force: true) }
+    }
+
+    /// An account's claude.ai cookies, decrypted off the main thread.
+    func webCookies(for account: Account) async throws -> [HTTPCookie] {
+        let store = cookieStore(for: account)
+        return try await Task.detached { try ClaudeWeb.webCookies(cookieStore: store) }.value
+    }
+
     /// Opens a claude.ai page inside Claude, in the account it is signed in with.
     func openInClaude(_ path: String) {
         if let url = URL(string: "claude://claude.ai\(path)") { NSWorkspace.shared.open(url) }
@@ -477,6 +503,7 @@ final class AppModel {
     /// Claude continues the four most recent marked chats on its own and the
     /// rest when they are opened, so the rest are opened one by one.
     private func continueRest(_ chats: [CutOffTurns.Chat]) {
+        guard !state.holdChats else { return }
         let rest = Array(chats.dropFirst(4))
         guard !rest.isEmpty else { return }
         Task { [weak self] in
@@ -486,6 +513,36 @@ final class AppModel {
                 self.open(chat)
                 try? await Task.sleep(for: .seconds(6))
             }
+        }
+    }
+
+    /// Adding several accounts: while on, restarts keep cut-off chats waiting
+    /// and nothing switches on its own. Turning it off continues them all in
+    /// the account Claude is signed in with, which takes one more restart.
+    func setHoldChats(_ on: Bool) async {
+        guard on != state.holdChats, !isBusy else { return }
+        state.holdChats = on
+        save()
+        if on {
+            record(String(localized: "Adding several accounts: chats wait until this is turned off."))
+            return
+        }
+        let ids = state.heldChats
+        guard !ids.isEmpty else { return }
+        let accounts = state.accounts
+        let ok = await restart(.continuing) { engine in try engine.continueHeld(ids, accounts: accounts) } done: { [weak self] report in
+            guard let self else { return }
+            self.cutOff = report.cutOff
+            self.record(String(localized: "Done adding accounts: \(report.cutOff.count) waiting chats continue in \(self.activeAccount?.displayName ?? "")."))
+            self.continueRest(report.cutOff)
+        }
+        if ok {
+            state.heldChats = []
+            save()
+        } else {
+            // Nothing was continued: keep holding, so the chats are not lost.
+            state.holdChats = true
+            save()
         }
     }
 
@@ -525,6 +582,7 @@ final class AppModel {
             step = nil
         }
         let appURL = ClaudeProcess.appURL
+        let holding = state.holdChats
         do {
             step = .quit
             let live = try await ClaudeProcess.quit()
@@ -532,8 +590,13 @@ final class AppModel {
             var engine = engine
             engine.liveConversations = live
             let result: R
+            let held: [String]
             do {
-                result = try await Task.detached { try change(engine) }.value
+                (result, held) = try await Task.detached {
+                    let result = try change(engine)
+                    // Adding several accounts: what this restart cut off waits.
+                    return (result, holding ? try engine.holdChats() : [])
+                }.value
             } catch {
                 try? await ClaudeProcess.launch(appURL)
                 throw error
@@ -541,8 +604,13 @@ final class AppModel {
             step = .launch
             try await ClaudeProcess.launch(appURL)
             done(result)
+            if holding {
+                state.heldChats += held.filter { !state.heldChats.contains($0) }
+                cutOff = []
+                save()
+            }
             outcome = Outcome(succeeded: true, title: Self.doneTitle(phase, signedIn: activeAccount),
-                              detail: Self.doneDetail(phase, cutOff: cutOff))
+                              detail: holding ? Self.heldDetail(state.heldChats.count) : Self.doneDetail(phase, cutOff: cutOff))
             Feedback.success(sound: state.playSounds)
             hud.finish()
             return true
@@ -560,8 +628,15 @@ final class AppModel {
         case let .switching(name): String(localized: "Signed in as \(name)")
         case .adding: String(localized: "Ready for the next account")
         case .importing: String(localized: "Chats brought along")
+        case .continuing: String(localized: "Chats continue")
         case .waitingForSignIn: ""
         }
+    }
+
+    private static func heldDetail(_ count: Int) -> String {
+        count == 0
+            ? String(localized: "No chats were cut off.")
+            : String(localized: "\(count) chats wait until you are done adding accounts.")
     }
 
     private static func doneDetail(_ phase: Phase, cutOff: [CutOffTurns.Chat]) -> String {
@@ -581,6 +656,33 @@ final class AppModel {
         state.updateChecked = .now
         if let release = try? await updates.latest() { state.latestVersion = release.version }
         save()
+    }
+
+    /// Claude Switcher → Check for Updates…: asks GitHub now and says what it found.
+    func checkForUpdatesNow() async {
+        let alert = NSAlert()
+        do {
+            guard updates.isConfigured else { throw APIError.status(0) }
+            let release = try await updates.latest()
+            state.latestVersion = release.version
+            state.updateChecked = .now
+            save()
+            if UpdateChecker.isNewer(release.version, than: AppInfo.version) {
+                alert.messageText = String(localized: "Claude Switcher \(release.version) is available")
+                alert.informativeText = String(localized: "You have \(AppInfo.version). Download the new version from its release page and drag it onto Applications; your accounts stay.")
+                alert.addButton(withTitle: String(localized: "Download"))
+                alert.addButton(withTitle: String(localized: "Later"))
+            } else {
+                alert.messageText = String(localized: "Claude Switcher is up to date")
+                alert.informativeText = String(localized: "\(AppInfo.version) is the latest version.")
+            }
+        } catch {
+            alert.alertStyle = .warning
+            alert.messageText = String(localized: "Could not check for updates")
+            alert.informativeText = String(localized: "GitHub did not answer. Try again in a moment.")
+        }
+        NSApp.activate()
+        if alert.runModal() == .alertFirstButtonReturn, alert.buttons.count == 2 { openReleasePage() }
     }
 
     func openReleasePage() {

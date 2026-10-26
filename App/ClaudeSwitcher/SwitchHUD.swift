@@ -99,6 +99,7 @@ struct SwitchHUDView: View {
         case let .switching(name): String(localized: "Switching to \(name)")
         case .adding: String(localized: "Getting Claude ready")
         case .importing: String(localized: "Bringing chats along")
+        case .continuing: String(localized: "Continuing chats")
         case .waitingForSignIn: String(localized: "Sign in to Claude")
         case nil: ""
         }

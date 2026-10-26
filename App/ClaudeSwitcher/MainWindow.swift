@@ -58,11 +58,14 @@ struct MainWindow: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                AddAccountButton()
-                    .buttonStyle(.borderless)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 10) {
+                    HoldChatsToggle()
+                    AddAccountButton()
+                        .buttonStyle(.borderless)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 300)
         } detail: {
@@ -86,6 +89,9 @@ struct MainWindow: View {
             }
         }
         .frame(minWidth: 860, minHeight: 560)
+        .sheet(item: Binding(get: { model.claudeAIPage }, set: { if $0 == nil { model.closeClaudeAIPage() } })) { page in
+            ClaudeAIPageSheet(page: page)
+        }
         .task {
             // Before the refresh: its first keychain read can wait on the user.
             if selection == nil { selection = Demo.initialSelection ?? defaultSelection }

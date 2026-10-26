@@ -39,6 +39,13 @@ enum Demo {
             timeline.record(ids[(day / 2) % 3], at: now.addingTimeInterval(-Double(day) * 86_400 - 3_600))
         }
         st.timeline = timeline
+        // Extra usage billed to Alex Rivera over the last days, month to date as claude.ai reports it.
+        var monthToDate = 0.0
+        for daysAgo in stride(from: 9, through: 0, by: -1) {
+            monthToDate += [0, 120, 0, 340, 80, 0, 510, 260, 0, 380][9 - daysAgo]
+            st.extraByDay["a1", default: [:]][ExtraLedger.dayKey(now.addingTimeInterval(-Double(daysAgo) * 86_400))] = monthToDate
+        }
+        st.accounts[0].usage?.extra?.usedCents = monthToDate
         return st
     }()
 

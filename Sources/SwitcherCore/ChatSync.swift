@@ -62,6 +62,28 @@ public enum ChatSync {
         return written
     }
 
+    /// Takes the "continue" marks off every chat entry of every account, so
+    /// Claude starts without continuing them, and returns the chats that had
+    /// one (ids without `local_`), for continuing them later.
+    public static func holdResumes(root: URL) throws -> [String] {
+        var held: [String] = []
+        for accountDir in Files.subdirectories(of: root) {
+            for dir in Files.subdirectories(of: accountDir) {
+                for name in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+                where name.hasPrefix("local_") && name.hasSuffix(".json") {
+                    let url = dir.appending(path: name)
+                    guard let entry = Entry(url), entry.isInterrupted else { continue }
+                    var cleared = entry.object
+                    for key in resumeKeys { try cleared.remove(key) }
+                    try Files.writeAtomically(cleared.data, to: url, modified: entry.modified)
+                    let id = String(name.dropFirst("local_".count).dropLast(".json".count))
+                    if !held.contains(id) { held.append(id) }
+                }
+            }
+        }
+        return held
+    }
+
     /// What Claude writes into a chat entry when a quit cuts off its turn.
     static let resumeKeys = ["interruptedByQuitAt", "interruptedAwaitingPerson", "interruptedUnseenResume"]
 

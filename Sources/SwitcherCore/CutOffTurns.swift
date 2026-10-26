@@ -97,6 +97,28 @@ public enum CutOffTurns {
         return marked.sorted { $0.0 > $1.0 }.map(\.1)
     }
 
+    /// Marks the chats `ids` of `account/org` to continue, as `mark` does,
+    /// for chats that were held while several accounts were added. Claude
+    /// must be closed. Returns them most recently active first.
+    public static func mark(ids: [String], desktop: ClaudeDesktop, account: String, org: String, now: Date = .now) throws -> [Chat] {
+        let dir = desktop.sessionsRoot.appending(path: account).appending(path: org)
+        var marked: [(Int64, Chat)] = []
+        for id in ids {
+            let url = dir.appending(path: "local_\(id).json")
+            guard var object = try? JSONObjectText(contentsOf: url) else { continue }
+            if object.raw("isArchived").map({ String(decoding: $0, as: UTF8.self) }) == "true" { continue }
+            let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            if !object.contains("interruptedByQuitAt") {
+                try object.set("interruptedByQuitAt", raw: Data(String(Int64(now.timeIntervalSince1970 * 1000)).utf8))
+                try object.set("interruptedAwaitingPerson", raw: Data("false".utf8))
+                try Files.writeAtomically(object.data, to: url, modified: modified)
+            }
+            let last = object.raw("lastActivityAt").flatMap { Int64(String(decoding: $0, as: UTF8.self)) } ?? 0
+            marked.append((last, Chat(id: id, title: object.string("title") ?? "", sideSessions: 0)))
+        }
+        return marked.sorted { $0.0 > $1.0 }.map(\.1)
+    }
+
     static func transcript(_ cliSessionID: String, in projects: URL) -> URL? {
         for dir in Files.subdirectories(of: projects) {
             let url = dir.appending(path: "\(cliSessionID).jsonl")

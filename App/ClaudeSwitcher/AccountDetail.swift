@@ -163,8 +163,8 @@ struct SetupSection: View {
             } header: {
                 Text("Setup")
             } footer: {
-                if account.id != model.active, (model.setupGaps(account)?.signIn.count ?? 0) > 0 {
-                    Text("Connectors are signed in to in Claude, in the account it is signed in with. Switch to this account to sign in to them.")
+                if (model.cloudSetups[account.id]?.connectors.contains { !$0.connected } ?? false) {
+                    Text("Connect opens claude.ai\u{2019}s Connectors page here, signed in as \(account.displayName), whichever account Claude is using. Sign in to each connector with its Connect button.")
                 }
             }
             .task(id: account.id) { await model.refreshCloudSetups() }
@@ -181,6 +181,7 @@ struct SetupSection: View {
     @ViewBuilder
     private func setupRow(_ title: LocalizedStringKey, subtitle: String, icon: String, color: Color,
                           state: String?, attention: Bool, action: LocalizedStringKey?, path: String,
+                          perform: (() -> Void)? = nil,
                           notes: [(LocalizedStringKey, [String])]) -> some View {
         LabeledContent {
             HStack(spacing: 10) {
@@ -189,7 +190,9 @@ struct SetupSection: View {
                 } else {
                     Image(systemName: "checkmark").foregroundStyle(.secondary)
                 }
-                if let action, account.id == model.active {
+                if let action, let perform {
+                    Button(action, action: perform)
+                } else if let action, account.id == model.active {
                     Button(action) { model.openInClaude(path) }
                 }
             }
@@ -216,7 +219,8 @@ struct SetupSection: View {
                  icon: "point.3.connected.trianglepath.dotted", color: .blue,
                  state: missing.isEmpty && signIn.isEmpty ? nil : summary(missing: missing.count, signIn: signIn.count),
                  attention: !missing.isEmpty || !signIn.isEmpty,
-                 action: signIn.isEmpty ? nil : "Sign In\u{2026}", path: "/settings/connectors",
+                 action: signIn.isEmpty ? nil : "Connect\u{2026}", path: "/settings/connectors",
+                 perform: model.hasSignIn(account) ? { model.connect(account) } : nil,
                  notes: [("Missing", missing.map(\.name)), ("Needs sign-in", signIn.map(\.name))])
     }
 

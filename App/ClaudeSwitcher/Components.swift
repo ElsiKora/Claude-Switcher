@@ -32,9 +32,12 @@ struct Avatar: View {
 
     private static let tints: [Color] = [.blue, .indigo, .teal, .purple, .pink, .orange, .mint, .cyan]
 
-    var tint: Color {
-        let sum = account.id.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
-        return Self.tints[sum % Self.tints.count]
+    var tint: Color { Self.tint(for: account.id) }
+
+    /// The account's color, the same in its avatar and in charts.
+    static func tint(for id: String) -> Color {
+        let sum = id.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
+        return tints[sum % tints.count]
     }
 
     var initials: String {

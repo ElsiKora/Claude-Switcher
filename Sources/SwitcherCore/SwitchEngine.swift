@@ -107,6 +107,25 @@ public struct SwitchEngine: Sendable {
         return try CutOffTurns.mark(desktop: desktop, account: account.id, org: account.org, live: liveConversations)
     }
 
+    /// Keeps the chats a restart would continue waiting instead (see
+    /// `ChatSync.holdResumes`). Runs right after a change, Claude closed.
+    public func holdChats() throws -> [String] {
+        try ChatSync.holdResumes(root: desktop.sessionsRoot)
+    }
+
+    /// Continues the held chats `ids`, and whatever this quit cut off, in the
+    /// signed-in `account`: brings every chat into it and marks them.
+    public func continueHeld(_ ids: [String], accounts: [Account]) throws -> SwitchReport {
+        try withBackup { active in
+            guard let account = accounts.first(where: { $0.id == active }) else { throw SwitchError.noSavedSignIn }
+            let cutOff = try markCutOffTurns(active, accounts)
+            var report = try importChats(into: account)
+            let held = try CutOffTurns.mark(ids: ids, desktop: desktop, account: account.id, org: account.org)
+            report.cutOff = cutOff + held.filter { h in !cutOff.contains { $0.id == h.id } }
+            return report
+        }
+    }
+
     /// Saves the sign-in Claude has now, so it can be switched back to.
     public func saveCurrentSignIn() throws {
         guard let active = try desktop.activeAccount() else { return }

@@ -35,7 +35,9 @@ struct ClaudeSwitcherApp: App {
         }
         .defaultSize(width: 1040, height: 760)
         .windowResizability(.contentMinSize)
-        .defaultLaunchBehavior(Self.isDemo ? .presented : .suppressed)
+        // A Dock app: the window opens with it and stays until it is closed;
+        // the menu bar item and Dock icon bring it back.
+        .defaultLaunchBehavior(.presented)
 
         Window("Welcome to Claude Switcher", id: "welcome") {
             WelcomeView()
@@ -54,6 +56,13 @@ struct ClaudeSwitcherApp: App {
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(Self.isDemo ? .presented : .suppressed)
 
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates\u{2026}") { Task { await model.checkForUpdatesNow() } }
+                    .disabled(ClaudeSwitcherApp.isDemo)
+            }
+        }
+
         Settings {
             SettingsView()
                 .environment(model)
@@ -63,7 +72,7 @@ struct ClaudeSwitcherApp: App {
     }
 }
 
-/// Opening the app again, from Finder or Spotlight, shows its window.
+/// Opening the app again, from the Dock, Finder or Spotlight, shows its window.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var openMainWindow: (() -> Void)?
 

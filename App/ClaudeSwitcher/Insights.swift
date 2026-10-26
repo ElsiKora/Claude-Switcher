@@ -80,8 +80,8 @@ final class Insights {
         }
     }
 
-    func report(_ range: Range, timeline: AccountTimeline) -> UsageReport {
-        UsageReport.make(buckets, timeline: timeline, range: range.dates)
+    func report(_ range: Range, timeline: AccountTimeline, filter: UsageFilter = .all) -> UsageReport {
+        UsageReport.make(buckets, timeline: timeline, range: range.dates, filter: filter)
     }
 
     /// Every chat of every account's list, once, with its latest state.

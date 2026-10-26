@@ -90,6 +90,12 @@ public struct UsageTotal: Sendable, Equatable {
         }
     }
 
+    public mutating func merge(_ other: UsageTotal) {
+        tokens = tokens + other.tokens
+        cost += other.cost
+        unpriced += other.unpriced
+    }
+
     /// Share of input served from the cache.
     public var cacheHitRate: Double {
         let all = tokens.input + tokens.cacheRead + tokens.write5m + tokens.write1h
@@ -97,8 +103,35 @@ public struct UsageTotal: Sendable, Equatable {
     }
 }
 
+/// Which accounts and models the analytics count; nil counts all.
+public struct UsageFilter: Sendable, Equatable {
+    /// Account ids; "" is usage no account can be named for.
+    public var accounts: Set<String>?
+    /// Model names as `Pricing.displayName` gives them.
+    public var models: Set<String>?
+
+    public init(accounts: Set<String>? = nil, models: Set<String>? = nil) {
+        self.accounts = accounts
+        self.models = models
+    }
+
+    public static let all = UsageFilter()
+
+    func includes(account: String, model: String) -> Bool {
+        (accounts?.contains(account) ?? true) && (models?.contains(model) ?? true)
+    }
+}
+
 /// Usage broken down for the analytics page.
 public struct UsageReport: Sendable {
+    /// One day of one model in one account: the finest grain the page sorts and groups.
+    public struct Cell: Sendable {
+        public var day: Date
+        public var account: String
+        public var model: String
+        public var total: UsageTotal
+    }
+
     public struct Day: Sendable, Identifiable {
         public var id: Date { day }
         public var day: Date
@@ -112,7 +145,14 @@ public struct UsageReport: Sendable {
     public var daysByAccount: [Day] = []
     public var byModel: [String: UsageTotal] = [:]
     public var byAccount: [String: UsageTotal] = [:]
+    /// All time, whatever the range and filter, for the chat list.
     public var byConversation: [String: UsageTotal] = [:]
+    /// In the range and filter.
+    public var byConversationInRange: [String: UsageTotal] = [:]
+    public var cells: [Cell] = []
+    /// Accounts and models with usage in the range, before the filter.
+    public var accountsSeen: Set<String> = []
+    public var modelsSeen: Set<String> = []
     public var lastUse: [String: Date] = [:]
 
     public init() {}
@@ -120,10 +160,12 @@ public struct UsageReport: Sendable {
     /// Sums `buckets` that fall in `range`, attributing each to an account
     /// with `timeline` (nil account ids count under "").
     public static func make(_ buckets: [UsageBucket: Tokens], timeline: AccountTimeline, range: ClosedRange<Date>,
-                            calendar: Calendar = .current) -> UsageReport {
+                            filter: UsageFilter = .all, calendar: Calendar = .current) -> UsageReport {
         var report = UsageReport()
         var days: [Date: [String: UsageTotal]] = [:]
         var daysAccount: [Date: [String: UsageTotal]] = [:]
+        struct CellKey: Hashable { var day: Date; var account: String; var model: String }
+        var cells: [CellKey: UsageTotal] = [:]
         for (bucket, tokens) in buckets {
             let date = Date(timeIntervalSince1970: Double(bucket.hour) * 3600)
             report.byConversation[bucket.conversation, default: UsageTotal()].add(tokens, bucket)
@@ -132,6 +174,11 @@ public struct UsageReport: Sendable {
             let account = timeline.account(at: date, conversation: bucket.conversation) ?? ""
             let model = Pricing.displayName(bucket.model)
             let day = calendar.startOfDay(for: date)
+            report.accountsSeen.insert(account)
+            report.modelsSeen.insert(model)
+            guard filter.includes(account: account, model: model) else { continue }
+            cells[CellKey(day: day, account: account, model: model), default: UsageTotal()].add(tokens, bucket)
+            report.byConversationInRange[bucket.conversation, default: UsageTotal()].add(tokens, bucket)
             report.total.add(tokens, bucket)
             report.byModel[model, default: UsageTotal()].add(tokens, bucket)
             report.byAccount[account, default: UsageTotal()].add(tokens, bucket)
@@ -140,8 +187,44 @@ public struct UsageReport: Sendable {
         }
         report.daysByModel = days.flatMap { day, models in models.map { Day(day: day, key: $0.key, total: $0.value) } }
             .sorted { ($0.day, $0.key) < ($1.day, $1.key) }
+        report.cells = cells.map { Cell(day: $0.key.day, account: $0.key.account, model: $0.key.model, total: $0.value) }
         report.daysByAccount = daysAccount.flatMap { day, accounts in accounts.map { Day(day: day, key: $0.key, total: $0.value) } }
             .sorted { ($0.day, $0.key) < ($1.day, $1.key) }
         return report
+    }
+}
+
+/// What claude.ai billed beyond each plan, per day, from the month-to-date
+/// amounts the switcher reads with each usage check. claude.ai only reports
+/// the month so far, so a day is the difference to the day before; the first
+/// day recorded has nothing to compare with and counts as unknown.
+public enum ExtraLedger {
+    public static func dayKey(_ date: Date, calendar: Calendar = .current) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    public static func day(_ key: String, calendar: Calendar = .current) -> Date? {
+        let parts = key.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    }
+
+    /// Day → amount billed that day, in minor units. A new month starts from zero.
+    public static func daily(_ monthToDate: [String: Double], calendar: Calendar = .current) -> [Date: Double] {
+        let days = monthToDate.keys.sorted()
+        var out: [Date: Double] = [:]
+        for (i, key) in days.enumerated() where i > 0 {
+            guard let date = day(key, calendar: calendar), let value = monthToDate[key],
+                  let previous = monthToDate[days[i - 1]], let previousDate = day(days[i - 1], calendar: calendar) else { continue }
+            let sameMonth = calendar.isDate(date, equalTo: previousDate, toGranularity: .month)
+            out[date] = sameMonth ? max(0, value - previous) : value
+        }
+        return out
+    }
+
+    /// Since when there are daily amounts: the day after the first one recorded.
+    public static func since(_ monthToDate: [String: Double], calendar: Calendar = .current) -> Date? {
+        monthToDate.keys.sorted().dropFirst().first.flatMap { day($0, calendar: calendar) }
     }
 }

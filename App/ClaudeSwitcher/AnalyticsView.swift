@@ -3,31 +3,38 @@ import SwiftUI
 import SwitcherCore
 
 /// Claude Code usage of every account: tokens, what it would cost at API
-/// prices, by day, model, account and chat, from Claude Code's transcripts.
+/// prices, by day, model, account and chat, from Claude Code's transcripts,
+/// and what claude.ai billed beyond each plan. Everything follows the range
+/// and the account and model filters.
 struct AnalyticsView: View {
     @Environment(AppModel.self) private var model
     @State private var range: Insights.Range = .week
-    @State private var split: Split = .model
+    @State private var split: Split = .account
     @State private var metric: Metric = .cost
+    @State private var accounts: Set<String>?
+    @State private var models: Set<String>?
+    @State private var group: Grouping = .dayAccount
+    @State private var sortOrder = [KeyPathComparator(\BreakdownItem.day, order: .reverse)]
 
-    enum Split: String, CaseIterable, Identifiable { case model = "Model", account = "Account"; var id: String { rawValue } }
+    enum Split: String, CaseIterable, Identifiable { case account = "Account", model = "Model"; var id: String { rawValue } }
     enum Metric: String, CaseIterable, Identifiable { case cost = "API Value", tokens = "Tokens"; var id: String { rawValue } }
 
     var body: some View {
         let insights = model.insights
-        let report = insights.report(range, timeline: model.timeline)
+        let report = insights.report(range, timeline: model.timeline, filter: UsageFilter(accounts: accounts, models: models))
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                header(insights)
+                header(insights, report)
                 tiles(report)
                 chart(report)
+                breakdown(report)
                 HStack(alignment: .top, spacing: 16) {
                     modelsCard(report)
                     accountsCard(report)
                 }
                 billedCard
                 chatsCard(report)
-                Text("\(Pricing.source). Counts every Claude Code reply in ~/.claude/projects, subagents included; replies with the same message id count once. The API value is what the same tokens would cost through the API, not what the subscription charges.")
+                Text("\(Pricing.source). Counts every Claude Code reply in ~/.claude/projects, subagents included; replies with the same message id count once. The API value is what the same tokens would cost through the API, not what the subscription charges. Usage counts for the account Claude was signed in to at the time; before Claude Switcher\u{2019}s first switch, for the account whose chat list held the chat. Unattributed is usage no account can be named for: terminal sessions, deleted chats, and chats from before Claude Switcher that no account\u{2019}s list kept.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -39,17 +46,21 @@ struct AnalyticsView: View {
         .task { await insights.refresh(model) }
     }
 
-    private func header(_ insights: Insights) -> some View {
+    // MARK: - Header and filters
+
+    private func header(_ insights: Insights, _ r: UsageReport) -> some View {
         HStack(spacing: 12) {
             Picker("Range", selection: $range) {
                 ForEach(Insights.Range.allCases) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 360)
+            .frame(maxWidth: 340)
+            filterMenu(title: accountsTitle(r), symbol: "person.2", all: r.accountsSeen, selection: $accounts, name: accountName)
+            filterMenu(title: modelsTitle(r), symbol: "cpu", all: r.modelsSeen, selection: $models, name: { $0 })
             Spacer()
             if let progress = insights.progress {
-                ProgressView(value: progress).frame(width: 120)
+                ProgressView(value: progress).frame(width: 100)
                 Text("Reading transcripts \(Int(progress * 100))%")
                     .font(.callout).foregroundStyle(.secondary).monospacedDigit()
             } else if let at = insights.updatedAt {
@@ -59,6 +70,46 @@ struct AnalyticsView: View {
                 .buttonStyle(.borderless)
                 .help("Read new transcripts")
         }
+    }
+
+    private func filterMenu(title: String, symbol: String, all: Set<String>, selection: Binding<Set<String>?>,
+                            name: @escaping (String) -> String) -> some View {
+        Menu {
+            Button("Show All") { selection.wrappedValue = nil }
+            Divider()
+            ForEach(all.sorted { name($0).localizedStandardCompare(name($1)) == .orderedAscending }, id: \.self) { key in
+                Toggle(name(key), isOn: Binding(
+                    get: { selection.wrappedValue?.contains(key) ?? true },
+                    set: { on in
+                        var set = selection.wrappedValue ?? all
+                        if on { set.insert(key) } else { set.remove(key) }
+                        selection.wrappedValue = set.isSuperset(of: all) ? nil : set
+                    }))
+            }
+        } label: {
+            Label(title, systemImage: symbol)
+        }
+        .fixedSize()
+    }
+
+    private func accountsTitle(_ r: UsageReport) -> String {
+        guard let accounts else { return String(localized: "All Accounts") }
+        return accounts.count == 1 ? accountName(accounts.first!) : String(localized: "\(accounts.count) Accounts")
+    }
+
+    private func modelsTitle(_ r: UsageReport) -> String {
+        guard let models else { return String(localized: "All Models") }
+        return models.count == 1 ? models.first! : String(localized: "\(models.count) Models")
+    }
+
+    /// The name usage is shown under: the account's, or what is known of it.
+    private func accountName(_ id: String) -> String {
+        if id.isEmpty { return String(localized: "Unattributed") }
+        return model.state.account(id)?.displayName ?? String(localized: "Account not in Claude Switcher")
+    }
+
+    private func accountColor(_ id: String) -> Color {
+        id.isEmpty || model.state.account(id) == nil ? .gray : Avatar.tint(for: id)
     }
 
     // MARK: - Tiles
@@ -92,6 +143,7 @@ struct AnalyticsView: View {
 
     private func chart(_ r: UsageReport) -> some View {
         let days = split == .model ? r.daysByModel : r.daysByAccount
+        let keys = Array(Set(days.map(\.key))).sorted { label($0).localizedStandardCompare(label($1)) == .orderedAscending }
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("By Day").font(.headline).fixedSize()
@@ -105,12 +157,19 @@ struct AnalyticsView: View {
                 ContentUnavailableView("No usage in this range", systemImage: "chart.bar")
                     .frame(height: 220)
             } else {
+                // Stacked segments stay square: rounding each one notches the stack.
                 Chart(days) { day in
                     BarMark(
                         x: .value("Day", day.day, unit: .day),
                         y: .value(metric.rawValue, metric == .cost ? day.total.cost : Double(day.total.tokens.total)))
                     .foregroundStyle(by: .value(split.rawValue, label(day.key)))
-                    .cornerRadius(3)
+                }
+                .chartForegroundStyleScale(domain: keys.map(label), range: keys.map(color))
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .day, count: range == .all || range == .month ? 5 : 1)) { _ in
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.month(.abbreviated).day(), centered: true)
+                    }
                 }
                 .chartYAxis {
                     AxisMarks { value in
@@ -129,10 +188,138 @@ struct AnalyticsView: View {
     }
 
     private func label(_ key: String) -> String {
-        split == .model ? key : model.state.account(key)?.displayName ?? String(localized: "Other")
+        split == .model ? key : accountName(key)
     }
 
-    // MARK: - Breakdowns
+    private func color(_ key: String) -> Color {
+        guard split == .account else {
+            let palette: [Color] = [.green, .orange, .blue, .pink, .purple, .teal, .yellow, .red, .indigo, .mint]
+            let sum = key.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
+            return palette[sum % palette.count]
+        }
+        return accountColor(key)
+    }
+
+    // MARK: - Breakdown table
+
+    enum Grouping: String, CaseIterable, Identifiable {
+        case day = "Day", account = "Account", model = "Model", dayAccount = "Day & Account", accountModel = "Account & Model", chat = "Chat"
+        var id: String { rawValue }
+        var hasDay: Bool { self == .day || self == .dayAccount }
+        var hasAccount: Bool { self == .account || self == .dayAccount || self == .accountModel }
+        var hasModel: Bool { self == .model || self == .accountModel }
+    }
+
+    private func breakdown(_ r: UsageReport) -> some View {
+        let items = breakdownItems(r).sorted(using: sortOrder)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Breakdown").font(.headline).fixedSize()
+                Spacer()
+                Picker("Group by", selection: $group) {
+                    ForEach(Grouping.allCases) { Text(LocalizedStringKey($0.rawValue)).tag($0) }
+                }
+                .fixedSize()
+            }
+            Table(items, sortOrder: $sortOrder) {
+                TableColumn("Day", value: \.day) { item in
+                    Text(group.hasDay ? item.day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) : "–")
+                        .foregroundStyle(group.hasDay ? .primary : .tertiary)
+                }
+                .width(min: 76, ideal: 86)
+                TableColumn("Name", value: \.name) { item in
+                    HStack(spacing: 6) {
+                        if group.hasAccount { Circle().fill(accountColor(item.account)).frame(width: 7, height: 7) }
+                        Text(item.name).lineLimit(1)
+                    }
+                }
+                .width(min: 90, ideal: 110)
+                if group.hasModel {
+                    TableColumn("Model", value: \.model) { item in Text(item.model).foregroundStyle(.secondary) }
+                        .width(min: 55, ideal: 70)
+                }
+                TableColumn("Replies", value: \.replies) { item in number(item.replies.formatted()) }
+                    .width(min: 50, ideal: 58)
+                TableColumn("Input", value: \.input) { item in number(compact(item.input)) }
+                    .width(min: 45, ideal: 52)
+                TableColumn("Output", value: \.output) { item in number(compact(item.output)) }
+                    .width(min: 45, ideal: 52)
+                TableColumn("Cached", value: \.cacheRead) { item in number(compact(item.cacheRead)) }
+                    .width(min: 55, ideal: 64)
+                TableColumn("API Value", value: \.cost) { item in number(dollars(item.cost)).fontWeight(.medium) }
+                    .width(min: 60, ideal: 70)
+                TableColumn("Extra Billed", value: \.billedSort) { item in
+                    number(item.billed).foregroundStyle(item.billedSort > 0 ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                }
+                .width(min: 70, ideal: 84)
+            }
+            // As tall as its rows, up to a screenful; the table scrolls past that.
+            .frame(height: min(420, max(120, 34 + 25 * CGFloat(items.count))))
+            Text(billedNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
+    }
+
+    private func number(_ text: String) -> some View {
+        Text(text).monospacedDigit().frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private var billedNote: String {
+        let since = model.state.extraByDay.values.compactMap { ExtraLedger.since($0) }.min()
+        let from = since.map { String(localized: "since \($0.formatted(date: .abbreviated, time: .omitted))") }
+            ?? String(localized: "from tomorrow on")
+        return String(localized: "Extra Billed is what claude.ai charged beyond the plan as extra usage, in each account\u{2019}s currency, by day \(from): claude.ai only reports the month so far, so Claude Switcher keeps the daily amounts itself. It is real money; the API value is not.")
+    }
+
+    /// The rows of the breakdown for the chosen grouping, from the report's cells.
+    private func breakdownItems(_ r: UsageReport) -> [BreakdownItem] {
+        let billed = billedByDay()
+        if group == .chat {
+            let titles = Dictionary(model.insights.chats.map { ($0.conversation, $0.title) }, uniquingKeysWith: { a, _ in a })
+            return r.byConversationInRange.map { id, total in
+                BreakdownItem(id: id, day: .distantPast, name: titles[id] ?? String(localized: "Terminal or deleted chat"),
+                              account: "", model: "", total: total, billed: [:])
+            }
+        }
+        struct Key: Hashable { var day: Date?; var account: String?; var model: String? }
+        var sums: [Key: UsageTotal] = [:]
+        for cell in r.cells {
+            let key = Key(day: group.hasDay ? cell.day : nil, account: group.hasAccount ? cell.account : nil,
+                          model: group.hasModel ? cell.model : nil)
+            sums[key, default: UsageTotal()].merge(cell.total)
+        }
+        return sums.map { key, total in
+            // Billing is known per account and day; a row covers the days and accounts it groups.
+            var money: [String: Double] = [:]
+            for (cell, amounts) in billed where (key.day == nil || key.day == cell.day) && (key.account == nil || key.account == cell.account)
+                && range.dates.contains(cell.day) && (accounts?.contains(cell.account) ?? true) && key.model == nil {
+                for (currency, value) in amounts { money[currency, default: 0] += value }
+            }
+            let name = key.account.map(accountName) ?? (key.model ?? String(localized: "All"))
+            return BreakdownItem(
+                id: "\(key.day?.timeIntervalSince1970 ?? 0)|\(key.account ?? "")|\(key.model ?? "")",
+                day: key.day ?? .distantPast, name: name, account: key.account ?? "",
+                model: key.model ?? (group == .model ? name : "–"), total: total, billed: money)
+        }
+    }
+
+    /// (day, account) → currency → amount billed that day, in major units.
+    private func billedByDay() -> [DayAccount: [String: Double]] {
+        var out: [DayAccount: [String: Double]] = [:]
+        for (account, monthToDate) in model.state.extraByDay {
+            let currency = model.state.account(account)?.usage?.extra?.currency ?? "USD"
+            for (day, minor) in ExtraLedger.daily(monthToDate) where minor > 0 {
+                out[DayAccount(day: day, account: account), default: [:]][currency, default: 0] += minor / 100
+            }
+        }
+        return out
+    }
+
+    // MARK: - Cards
 
     private func modelsCard(_ r: UsageReport) -> some View {
         let rows = r.byModel.sorted { $0.value.cost > $1.value.cost }
@@ -153,9 +340,10 @@ struct AnalyticsView: View {
                 let account = model.state.account(id)
                 HStack(spacing: 10) {
                     if let account { AccountRings(account: account, size: 26) } else {
-                        Image(systemName: "person.crop.circle.badge.questionmark").font(.system(size: 20)).foregroundStyle(.secondary).frame(width: 26)
+                        Image(systemName: id.isEmpty ? "questionmark.circle" : "person.crop.circle.badge.questionmark")
+                            .font(.system(size: 20)).foregroundStyle(.secondary).frame(width: 26)
                     }
-                    BreakdownRow(title: account?.displayName ?? String(localized: "Other"), subtitle: billedLine(account, total),
+                    BreakdownRow(title: accountName(id), subtitle: billedLine(account, total),
                                  value: dollars(total.cost), share: top > 0 ? total.cost / top : 0)
                 }
             }
@@ -203,9 +391,9 @@ struct AnalyticsView: View {
 
     private func chatsCard(_ r: UsageReport) -> some View {
         let titles = Dictionary(model.insights.chats.map { ($0.conversation, $0.title) }, uniquingKeysWith: { a, _ in a })
-        let rows = r.byConversation.sorted { $0.value.cost > $1.value.cost }.prefix(8)
+        let rows = r.byConversationInRange.sorted { $0.value.cost > $1.value.cost }.prefix(8)
         let top = rows.first?.value.cost ?? 0
-        return Card(title: "Costliest Chats (all time)") {
+        return Card(title: "Costliest Chats") {
             ForEach(Array(rows), id: \.key) { id, total in
                 BreakdownRow(title: titles[id] ?? String(localized: "Terminal or deleted chat"),
                              subtitle: String(localized: "\(compact(total.tokens.total)) tokens · \(total.tokens.messages.formatted()) replies"),
@@ -213,6 +401,48 @@ struct AnalyticsView: View {
             }
         }
     }
+}
+
+struct DayAccount: Hashable {
+    var day: Date
+    var account: String
+}
+
+/// One row of the breakdown table.
+struct BreakdownItem: Identifiable {
+    let id: String
+    let day: Date
+    let name: String
+    let account: String
+    let model: String
+    let replies: Int
+    let input: Int
+    let output: Int
+    let cacheRead: Int
+    let cost: Double
+    /// Currency → amount, in major units.
+    let billedAmounts: [String: Double]
+
+    init(id: String, day: Date, name: String, account: String, model: String, total: UsageTotal, billed: [String: Double]) {
+        self.id = id
+        self.day = day
+        self.name = name
+        self.account = account
+        self.model = model
+        replies = total.tokens.messages
+        input = total.tokens.input + total.tokens.write5m + total.tokens.write1h
+        output = total.tokens.output
+        cacheRead = total.tokens.cacheRead
+        cost = total.cost
+        billedAmounts = billed
+    }
+
+    var billed: String {
+        billedAmounts.isEmpty ? "–" : billedAmounts.sorted { $0.key < $1.key }.map { money($0.value, $0.key) }.joined(separator: " + ")
+    }
+
+    /// Amounts in different currencies cannot be added up, so rows sort by their largest one.
+    var billedSort: Double { billedAmounts.values.max() ?? 0 }
 }
 
 // MARK: - Pieces

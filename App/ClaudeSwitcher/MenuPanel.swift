@@ -6,7 +6,6 @@ import SwitcherCore
 struct MenuPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -46,14 +45,14 @@ struct MenuPanel: View {
 
             Divider().padding(.horizontal, 14).padding(.vertical, 5)
 
+            HoldChatsToggle()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 4)
+
             VStack(spacing: 0) {
                 AddAccountButton(style: .menuRow)
                 MenuRow("Open Claude Switcher", systemImage: "macwindow") {
                     openWindow(id: "main")
-                    NSApp.activate()
-                }
-                MenuRow("Settings\u{2026}", systemImage: "gearshape") {
-                    openSettings()
                     NSApp.activate()
                 }
                 Divider().padding(.horizontal, 9).padding(.vertical, 5)
@@ -279,6 +278,38 @@ struct AddAccountButton: View {
     static let warning = String(localized: "Never use Sign Out in Claude to change accounts: it ends the saved sign-in.")
 }
 
+/// Adding several accounts: a switch that keeps cut-off chats waiting until
+/// it is turned off on the account they should continue in.
+struct HoldChatsToggle: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Toggle(isOn: Binding(get: { model.state.holdChats }, set: { on in Task { await model.setHoldChats(on) } })) {
+                Text("Adding several accounts")
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            Text(detail)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .disabled(model.isBusy)
+        .help("While on, adding or switching accounts keeps cut-off chats waiting, and nothing switches on its own.")
+    }
+
+    private var detail: String {
+        let held = model.state.heldChats.count
+        guard model.state.holdChats else { return String(localized: "Chats wait while you add accounts one after another.") }
+        return held == 0
+            ? String(localized: "On. Turn it off on the last account.")
+            : String(localized: "\(held) chats wait. Turning this off continues them in \(model.activeAccount?.displayName ?? String(localized: "this account")).")
+    }
+}
+
 /// Errors, a switch in progress, a switch waiting for Claude to be idle, and update news.
 struct PanelNotices: View {
     @Environment(AppModel.self) private var model
@@ -354,6 +385,7 @@ struct PhaseRow: View {
         case .adding: String(localized: "Getting Claude ready for another account")
         case .waitingForSignIn: String(localized: "Sign in to Claude with the other account")
         case .importing: String(localized: "Bringing chats into the new account")
+        case .continuing: String(localized: "Continuing the waiting chats")
         }
     }
 

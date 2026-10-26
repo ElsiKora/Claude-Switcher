@@ -77,6 +77,29 @@ public struct ClaudeWeb: Sendable {
     struct Cookie {
         var name: String
         var value: String
+        var host = "claude.ai"
+        var path = "/"
+        var secure = true
+        var httpOnly = false
+        /// Microseconds since 1601-01-01, Chromium's clock; 0 for a session cookie.
+        var expires: Int64 = 0
+    }
+
+    /// The claude.ai cookies of a cookie store as `HTTPCookie`s, for a web
+    /// view that opens claude.ai as that account. They are scoped to
+    /// claude.ai, so pages of other sites never see them.
+    public static func webCookies(cookieStore: URL, storage: SafeStorage = .shared) throws -> [HTTPCookie] {
+        try cookies(in: cookieStore, storage: storage).compactMap { c in
+            var properties: [HTTPCookiePropertyKey: Any] = [
+                .name: c.name, .value: c.value, .domain: c.host, .path: c.path,
+            ]
+            if c.secure { properties[.secure] = "TRUE" }
+            if c.httpOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
+            if c.expires > 0 {
+                properties[.expires] = Date(timeIntervalSince1970: Double(c.expires) / 1_000_000 - 11_644_473_600)
+            }
+            return HTTPCookie(properties: properties)
+        }
     }
 
     /// The claude.ai cookies, decrypted. Chromium prefixes each value with a
@@ -98,7 +121,10 @@ public struct ClaudeWeb: Sendable {
         }
         sqlite3_finalize(stmt)
 
-        let sql = "SELECT name, value, encrypted_value FROM cookies WHERE host_key = 'claude.ai' OR host_key = '.claude.ai'"
+        let sql = """
+            SELECT name, value, encrypted_value, host_key, path, is_secure, is_httponly, expires_utc
+            FROM cookies WHERE host_key = 'claude.ai' OR host_key = '.claude.ai'
+            """
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw SafeStorageError.unexpectedFormat }
         defer { sqlite3_finalize(stmt) }
         var out: [Cookie] = []
@@ -111,7 +137,11 @@ public struct ClaudeWeb: Sendable {
                 if version >= 24, plain.count >= 32 { plain = plain.dropFirst(32) }
                 value = String(decoding: plain, as: UTF8.self)
             }
-            out.append(Cookie(name: name, value: value))
+            out.append(Cookie(
+                name: name, value: value, host: String(cString: sqlite3_column_text(stmt, 3)),
+                path: String(cString: sqlite3_column_text(stmt, 4)),
+                secure: sqlite3_column_int(stmt, 5) != 0, httpOnly: sqlite3_column_int(stmt, 6) != 0,
+                expires: sqlite3_column_int64(stmt, 7)))
         }
         return out
     }
