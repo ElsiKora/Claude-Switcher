@@ -300,6 +300,7 @@ final class AppModel {
                 let usage = try await api.usage(token: token)
                 let before = state.account(job.id)?.usage
                 state.update(job.id) { $0.usage = usage; $0.problem = nil }
+                state.history[job.id, default: UsageHistory()].add(usage)
                 if let extra = usage.extra, extra.enabled, let used = extra.usedCents {
                     // claude.ai reports the month so far; keeping the last amount of each day gives the days.
                     state.extraByDay[job.id, default: [:]][ExtraLedger.dayKey(now)] = used
@@ -307,6 +308,11 @@ final class AppModel {
                         state.extraTracks[job.id] = ExtraTrack(at: now, amount: used)
                     } else {
                         state.extraTracks[job.id]?.record(used, at: now)
+                    }
+                    if let alert = state.extraAlert, let account = state.account(job.id),
+                       let today = ExtraLedger.daily(state.extraByDay[job.id] ?? [:])[Calendar.current.startOfDay(for: now)],
+                       today >= alert * 100 {
+                        notifier.extraToday(account, amount: today / 100, currency: extra.currency, day: ExtraLedger.dayKey(now))
                     }
                 }
                 if let account = state.account(job.id) { notifier.usageChanged(account, from: before, to: usage, model: self) }
@@ -338,13 +344,110 @@ final class AppModel {
             addingSince = nil
             phase = nil
         }
-        // Only "use up expiring weeks" waits for idle chats, so only it needs the process list.
-        let commandRunning = state.spendWeekly && !ClaudeProcess.liveConversations().runningCommands.isEmpty
-        if let (target, cause) = Policy.autoTarget(state, active: active, claudeRunning: claudeRunning, lastChat: lastChat,
-                                                   commandRunning: commandRunning, now: now) {
-            await switchTo(target, cause: cause)
-        }
+        await switchIfDue()
+        summarizeYesterdayIfDue()
         await checkForUpdate()
+    }
+
+    /// Since when a "soon" switch has been waiting for a pause between replies.
+    private var waitingSince: Date?
+
+    /// Runs the automatic switch when the policy calls for one: at once when
+    /// the limit runs out within minutes, else at the next pause between
+    /// replies, waiting at most `Policy.pauseWait`.
+    private func switchIfDue() async {
+        // Only "use up expiring weeks" waits for idle chats, so only it needs the process list.
+        let live = state.spendWeekly ? ClaudeProcess.liveConversations() : LiveConversations()
+        var context = Policy.Context(claudeRunning: claudeRunning, lastChat: lastChat,
+                                     commandRunning: !live.runningCommands.isEmpty, now: now)
+        guard var decision = Policy.autoTarget(state, active: active, context: context) else {
+            waitingSince = nil
+            warnIfBillingWithoutRoom()
+            return
+        }
+        if decision.1 == .spendWeekly {
+            // Worth it only if the week it would use is clearly more than re-reading every open chat.
+            let ids = live.ids
+            context.switchCost = await Task.detached { SwitchCost.estimate(conversations: ids, projects: UsageIndex.defaultProjects) }.value
+            context.dollarsPerWeeklyPercent = await dollarsPerWeeklyPercent()
+            guard let again = Policy.autoTarget(state, active: active, context: context) else { return }
+            decision = again
+        }
+        if decision.2 == .soon, let last = lastChat, now.timeIntervalSince(last) < Policy.pause {
+            let since = waitingSince ?? now
+            waitingSince = since
+            if now.timeIntervalSince(since) < Policy.pauseWait { return }
+        }
+        waitingSince = nil
+        await switchTo(decision.0, cause: decision.1)
+    }
+
+    /// What a percent of the signed-in account's weekly limit cost lately at
+    /// API prices, from its last three hours: the API value of its usage
+    /// against how far its week moved. Nil until the week has moved a percent.
+    private func dollarsPerWeeklyPercent() async -> Double? {
+        guard let id = active, let readings = state.history[id]?.readings, let last = readings.last,
+              let first = readings.first(where: { now.timeIntervalSince($0.date) <= Forecast.weeklyWindow }),
+              last.weekly - first.weekly >= 1 else { return nil }
+        await insights.updateBuckets()
+        let spent = UsageReport.make(insights.buckets, timeline: timeline, range: first.date...last.date,
+                                     filter: UsageFilter(accounts: [id])).total.cost
+        return spent / (last.weekly - first.weekly)
+    }
+
+    /// With extra usage on and no account to move to, running out costs
+    /// money: say so once an hour.
+    private func warnIfBillingWithoutRoom() {
+        guard state.autoSwitch, let account = activeAccount, let usage = account.usage?.current(at: now),
+              account.usage?.extra?.enabled == true, usage.peak >= 100 else { return }
+        notifier.billingWithoutRoom(account, hour: Int(now.timeIntervalSince1970 / 3600))
+    }
+
+    // MARK: - Pause
+
+    var isPaused: Bool { state.pausedUntil.map { now < $0 } ?? false }
+
+    /// When an account's limits run out at the pace of its last checks.
+    func forecast(_ account: Account) -> Forecast? {
+        account.usage.map { Forecast(usage: $0, history: state.history[account.id], now: now) }
+    }
+
+    func pauseAutoSwitch(for duration: TimeInterval = 2 * 3600) {
+        state.pausedUntil = .now.addingTimeInterval(duration)
+        save()
+        record(String(localized: "Automatic switching paused until \(state.pausedUntil!.formatted(date: .omitted, time: .shortened))."))
+    }
+
+    func resumeAutoSwitch() {
+        state.pausedUntil = nil
+        save()
+        record(String(localized: "Automatic switching resumed."))
+    }
+
+    // MARK: - Morning summary
+
+    /// After 8 in the morning, once a day: the day before in one notification.
+    private func summarizeYesterdayIfDue() {
+        let cal = Calendar.current
+        guard state.notify, state.morningSummary, !isDemo, cal.component(.hour, from: now) >= 8,
+              let yesterday = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: now)) else { return }
+        let key = ExtraLedger.dayKey(yesterday)
+        guard state.summaryDay != key else { return }
+        state.summaryDay = key
+        save()
+        Task {
+            await insights.updateBuckets()
+            let day = yesterday...cal.startOfDay(for: now).addingTimeInterval(-1)
+            let total = UsageReport.make(insights.buckets, timeline: timeline, range: day).total
+            let switches = timeline.signIns.filter { day.contains($0.date) }.count
+            var billed: [String] = []
+            for account in accounts {
+                if let minor = ExtraLedger.daily(state.extraByDay[account.id] ?? [:])[yesterday], minor > 0 {
+                    billed.append("\(account.displayName) \(money(minor / 100, account.usage?.extra?.currency))")
+                }
+            }
+            notifier.morningSummary(apiValue: total.cost, replies: total.tokens.messages, switches: switches, billed: billed)
+        }
     }
 
     /// An access token for an account: from Claude's live config when it is
@@ -431,6 +534,8 @@ final class AppModel {
     func setThreshold(_ t: Double) { state.threshold = t; save() }
     func setCheckForUpdates(_ on: Bool) { state.checkForUpdates = on; save() }
     func setPlaySounds(_ on: Bool) { state.playSounds = on; save() }
+    func setMorningSummary(_ on: Bool) { state.morningSummary = on; save() }
+    func setExtraAlert(_ amount: Double?) { state.extraAlert = amount; save() }
 
     func setNotify(_ on: Bool) async {
         let allowed = on ? await notifier.requestPermission() : false

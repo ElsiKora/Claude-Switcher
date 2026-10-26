@@ -54,6 +54,17 @@ enum Demo {
             DateInterval(start: now.addingTimeInterval(-3 * 86_400 + 13 * 3600), duration: 7 * 3600),
         ]
         st.extraTracks["a1"] = track
+        // The last 40 minutes of Alex Rivera's checks, for the pace and when it runs out.
+        st.autoSwitch = true
+        var history = UsageHistory()
+        for minutesAgo in stride(from: 40, through: 0, by: -2) {
+            var u = st.accounts[0].usage!
+            u.session = 82 - Double(minutesAgo) * 0.55
+            u.weekly = 61 - Double(minutesAgo) * 0.05
+            u.checkedAt = now.addingTimeInterval(-Double(minutesAgo) * 60 - 1)
+            history.add(u)
+        }
+        st.history["a1"] = history
         return st
     }()
 

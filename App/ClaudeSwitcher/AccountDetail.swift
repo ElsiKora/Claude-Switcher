@@ -19,9 +19,12 @@ struct AccountDetail: View {
             Notices()
 
             Section {
+                let forecast = model.forecast(account)
                 limitRow("5-hour limit", icon: "clock.fill", color: .blue, percent: usage?.session, reset: usage?.sessionReset,
+                         runsOut: forecast?.session,
                          colors: LimitStyle.session(usage?.session ?? 0, threshold: model.state.threshold))
                 limitRow("Weekly limit", icon: "calendar", color: .purple, percent: usage?.weekly, reset: usage?.weeklyReset,
+                         runsOut: forecast?.weekly,
                          colors: LimitStyle.week(usage?.weekly ?? 0, threshold: model.state.threshold))
             } header: {
                 Text("Usage")
@@ -87,7 +90,8 @@ struct AccountDetail: View {
         .padding(.vertical, 6)
     }
 
-    private func limitRow(_ title: LocalizedStringKey, icon: String, color: Color, percent: Double?, reset: Date?, colors: [Color]) -> some View {
+    private func limitRow(_ title: LocalizedStringKey, icon: String, color: Color, percent: Double?, reset: Date?, runsOut: Date?,
+                          colors: [Color]) -> some View {
         LabeledContent {
             HStack(spacing: 10) {
                 UsageBar(percent: percent, threshold: model.state.threshold, height: 6, colors: colors)
@@ -99,8 +103,11 @@ struct AccountDetail: View {
         } label: {
             Label {
                 Text(title)
-                if let reset {
-                    Text("Resets \(reset.resetText)")
+                switch (reset, runsOut) {
+                case let (reset?, out?): Text("Runs out about \(out.resetText) at this pace · resets \(reset.resetText)")
+                case let (nil, out?): Text("Runs out about \(out.resetText) at this pace")
+                case let (reset?, nil): Text("Resets \(reset.resetText)")
+                case (nil, nil): EmptyView()
                 }
             } icon: {
                 SettingsIcon(systemName: icon, color: color)

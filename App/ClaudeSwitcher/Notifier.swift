@@ -47,6 +47,34 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// Extra usage billed today passed the amount set in Settings.
+    func extraToday(_ account: Account, amount: Double, currency: String?, day: String) {
+        guard AppModel.shared.state.notify else { return }
+        post("extra-\(account.id)-\(day)",
+             title: String(localized: "\(account.displayName): \(money(amount, currency)) of extra usage today"),
+             body: String(localized: "claude.ai has billed this beyond the plan today. Another account with room avoids more."),
+             switchTo: AppModel.shared.suggestion)
+    }
+
+    /// The signed-in account is past its limit with extra usage on, and no account has room to move to.
+    func billingWithoutRoom(_ account: Account, hour: Int) {
+        guard AppModel.shared.state.notify else { return }
+        post("billing-\(account.id)-\(hour)",
+             title: String(localized: "\(account.displayName) is billing extra usage"),
+             body: String(localized: "Its limit is used up and no other account has room, so claude.ai charges for what Claude does now."),
+             switchTo: nil)
+    }
+
+    /// Yesterday in one line, each morning.
+    func morningSummary(apiValue: Double, replies: Int, switches: Int, billed: [String]) {
+        var body = String(localized: "\(dollars(apiValue)) API value in \(replies.formatted()) replies, \(switches) switches.")
+        body += " " + (billed.isEmpty
+            ? String(localized: "No extra usage billed.")
+            : String(localized: "Extra usage billed: \(billed.joined(separator: ", ")).")
+        )
+        post("summary-\(Int(Date.now.timeIntervalSince1970 / 86_400))", title: String(localized: "Yesterday in Claude Code"), body: body, switchTo: nil)
+    }
+
     private func post(_ id: String, title: String, body: String, switchTo account: Account?) {
         guard told.insert(id).inserted else { return }
         let content = UNMutableNotificationContent()

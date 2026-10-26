@@ -64,6 +64,16 @@ final class Insights {
         chats = await Self.readChats(model, report: report(.all, timeline: model.timeline))
     }
 
+    /// Reads new transcript records into the buckets, without the chat list:
+    /// for the switcher's own use (pace, morning summary).
+    func updateBuckets() async {
+        guard !running else { return }
+        running = true
+        defer { running = false }
+        let index = index
+        buckets = await Task.detached { await index.refresh() }.value
+    }
+
     enum Range: String, CaseIterable, Identifiable {
         case today = "Today", week = "7 Days", month = "30 Days", thisMonth = "This Month", all = "All"
         var id: String { rawValue }

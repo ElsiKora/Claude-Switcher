@@ -65,6 +65,16 @@ public struct SwitcherState: Codable, Sendable, Equatable {
     public var extraByDay: [String: [String: Double]] = [:]
     /// When each account was being charged for extra usage.
     public var extraTracks: [String: ExtraTrack] = [:]
+    /// Each account's limits over the last hours, for the pace they are used at.
+    public var history: [String: UsageHistory] = [:]
+    /// Automatic switching is paused until then.
+    public var pausedUntil: Date?
+    /// Tell when one account's extra usage billed today passes this, in its own currency.
+    public var extraAlert: Double?
+    /// A notification each morning about the day before.
+    public var morningSummary = true
+    /// The day ("yyyy-MM-dd") the last morning summary was about.
+    public var summaryDay: String?
 
     public init() {}
 
@@ -102,6 +112,11 @@ public struct SwitcherState: Codable, Sendable, Equatable {
         heldChats = try c.decodeIfPresent([String].self, forKey: .heldChats) ?? d.heldChats
         extraByDay = try c.decodeIfPresent([String: [String: Double]].self, forKey: .extraByDay) ?? d.extraByDay
         extraTracks = try c.decodeIfPresent([String: ExtraTrack].self, forKey: .extraTracks) ?? d.extraTracks
+        history = try c.decodeIfPresent([String: UsageHistory].self, forKey: .history) ?? d.history
+        pausedUntil = try c.decodeIfPresent(Date.self, forKey: .pausedUntil)
+        extraAlert = try c.decodeIfPresent(Double.self, forKey: .extraAlert)
+        morningSummary = try c.decodeIfPresent(Bool.self, forKey: .morningSummary) ?? d.morningSummary
+        summaryDay = try c.decodeIfPresent(String.self, forKey: .summaryDay)
     }
 }
 
@@ -138,31 +153,114 @@ public enum Policy {
         return (account.usage?.current(at: now).peak ?? 0) >= hotAt ? hotEvery : activeEvery
     }
 
-    /// The account to switch to on its own, and why. `lastChat` is when
-    /// anyone last worked in a chat, `commandRunning` whether a chat is
-    /// running a shell command (which writes nothing until it ends).
-    public static func autoTarget(_ st: SwitcherState, active: String?, claudeRunning: Bool, lastChat: Date?,
-                                  commandRunning: Bool, now: Date) -> (Account, SwitchCause)? {
-        guard claudeRunning, !st.holdChats, let cur = st.account(active), let usage = cur.usage,
+    /// What the switcher knows besides the state when it decides.
+    public struct Context: Sendable {
+        public var claudeRunning: Bool
+        /// When anyone last worked in a chat.
+        public var lastChat: Date?
+        /// Whether a chat is running a shell command.
+        public var commandRunning: Bool
+        /// What re-reading every open chat would cost in the new account, at
+        /// API prices, and what a percent of a weekly limit is worth there.
+        public var switchCost: Double?
+        public var dollarsPerWeeklyPercent: Double?
+        public var now: Date
+
+        public init(claudeRunning: Bool, lastChat: Date? = nil, commandRunning: Bool = false,
+                    switchCost: Double? = nil, dollarsPerWeeklyPercent: Double? = nil, now: Date) {
+            self.claudeRunning = claudeRunning
+            self.lastChat = lastChat
+            self.commandRunning = commandRunning
+            self.switchCost = switchCost
+            self.dollarsPerWeeklyPercent = dollarsPerWeeklyPercent
+            self.now = now
+        }
+    }
+
+    /// How soon a switch has to happen.
+    public enum Urgency: Sendable, Equatable {
+        /// The limit runs out within minutes: switch now, even mid-reply.
+        case now
+        /// It runs out soon: switch at the next pause between replies, at most `pauseWait` from now.
+        case soon
+    }
+
+    /// How far ahead the pace is projected: a little past the next check.
+    static let horizon: TimeInterval = 3 * 60
+    /// With extra usage on, running out costs money, so the switch comes earlier.
+    static let paidHorizon: TimeInterval = 6 * 60
+    /// The longest a "soon" switch waits for a pause between replies.
+    public static let pauseWait: TimeInterval = 3 * 60
+    /// A pause: no chat wrote for this long.
+    public static let pause: TimeInterval = 45
+    /// A move to an expiring week has to be worth this many times what it costs.
+    static let worthIt: Double = 3
+
+    /// The account to switch to on its own, why, and how soon.
+    public static func autoTarget(_ st: SwitcherState, active: String?, context c: Context) -> (Account, SwitchCause, Urgency)? {
+        let now = c.now
+        guard c.claudeRunning, !st.holdChats, st.pausedUntil.map({ now >= $0 }) ?? true,
+              let cur = st.account(active), let usage = cur.usage,
               now.timeIntervalSince(usage.checkedAt) <= activeFresh,
               st.lastSwitch.map({ now.timeIntervalSince($0) >= cooldown }) ?? true
         else { return nil }
+        let u = usage.current(at: now)
+        let forecast = Forecast(usage: usage, history: st.history[cur.id], now: now)
 
-        if st.autoSwitch, usage.current(at: now).peak >= st.threshold,
-           let best = st.accounts.filter({ usable($0, st, cur: cur, now: now) })
-               .min(by: { $0.usage!.current(at: now).peak < $1.usage!.current(at: now).peak }) {
-            return (best, .nearlyFull)
+        if st.autoSwitch {
+            // Runs out at this pace before long, or has reached the threshold.
+            let paid = usage.extra?.enabled == true
+            let ahead = forecast.peak(of: usage, in: paid ? paidHorizon : horizon, now: now)
+            if u.peak >= st.threshold || ahead >= 99, let best = best(st, cur: cur, now: now) {
+                let soonFull = forecast.peak(of: usage, in: 90, now: now) >= 99.5
+                return (best, .nearlyFull, u.peak >= 99 || soonFull ? .now : .soon)
+            }
         }
 
         // The active account keeps going while its own week is the one running out.
         let handPaused = st.handSwitch.map { now.timeIntervalSince($0) < handPause } ?? false
-        let chatting = commandRunning || (lastChat.map { now.timeIntervalSince($0) < idleFor } ?? false)
+        let chatting = c.commandRunning || (c.lastChat.map { now.timeIntervalSince($0) < idleFor } ?? false)
         if st.spendWeekly, !handPaused, !chatting, !spendable(cur, st, now: now),
            let best = st.accounts.filter({ usable($0, st, cur: cur, now: now) && spendable($0, st, now: now) })
-               .min(by: { ($0.usage!.weeklyReset ?? .distantFuture) < ($1.usage!.weeklyReset ?? .distantFuture) }) {
-            return (best, .spendWeekly)
+               .min(by: { ($0.usage!.weeklyReset ?? .distantFuture) < ($1.usage!.weeklyReset ?? .distantFuture) }),
+           worth(best, st, c) {
+            return (best, .spendWeekly, .soon)
         }
         return nil
+    }
+
+    /// The account to move to when the active one runs out: the one whose
+    /// free room would be lost first (a 5-hour window or a week about to
+    /// reset), else the one with the most room. Room that would be lost is
+    /// worth using before room that keeps.
+    static func best(_ st: SwitcherState, cur: Account, now: Date) -> Account? {
+        let candidates = st.accounts.filter { usable($0, st, cur: cur, now: now) }
+        func expires(_ a: Account) -> Date? {
+            let u = a.usage!.current(at: now)
+            let windows: [(Double, Date?)] = [(100 - u.session, u.sessionReset), (100 - u.weekly, u.weeklyReset)]
+            return windows.compactMap { room, reset in room >= minRoom ? reset : nil }.min()
+        }
+        return candidates.min { a, b in
+            switch (expires(a), expires(b)) {
+            case let (x?, y?) where x != y: x < y
+            case (_?, nil): true
+            case (nil, _?): false
+            default: a.usage!.current(at: now).peak < b.usage!.current(at: now).peak
+            }
+        }
+    }
+
+    /// Room a window needs to count as worth using before it resets.
+    static let minRoom: Double = 20
+
+    /// Whether moving to `target` for its expiring week gains clearly more
+    /// than the switch costs: the week it has left against re-reading every
+    /// open chat. Without the figures to tell, it moves, as it always has.
+    static func worth(_ target: Account, _ st: SwitcherState, _ c: Context) -> Bool {
+        guard let cost = c.switchCost, let perPercent = c.dollarsPerWeeklyPercent, perPercent > 0,
+              let u = target.usage?.current(at: c.now) else { return true }
+        let gain = (100 - u.weekly) * perPercent
+        return gain >= worthIt * cost
     }
 
     /// The account with the most room left, when it has clearly more than the active one.
@@ -181,6 +279,8 @@ public enum Policy {
         guard a.id != cur.id, a.problem == nil, let u = a.usage, now.timeIntervalSince(u.checkedAt) <= idleFresh else {
             return false
         }
+        // Below the threshold with room to spare, so never one that is
+        // already at its limit and billing extra usage.
         return u.current(at: now).peak < st.threshold - headroom
     }
 

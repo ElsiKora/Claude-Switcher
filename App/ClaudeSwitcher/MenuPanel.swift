@@ -51,6 +51,17 @@ struct MenuPanel: View {
 
             VStack(spacing: 0) {
                 AddAccountButton(style: .menuRow)
+                if model.state.autoSwitch || model.state.spendWeekly {
+                    if model.isPaused, let until = model.state.pausedUntil {
+                        MenuRow("Resume Automatic Switching (paused until \(until.resetText))", systemImage: "play.circle") {
+                            model.resumeAutoSwitch()
+                        }
+                    } else {
+                        MenuRow("Pause Automatic Switching for 2 Hours", systemImage: "pause.circle") {
+                            model.pauseAutoSwitch()
+                        }
+                    }
+                }
                 MenuRow("Open Claude Switcher", systemImage: "macwindow") {
                     openWindow(id: MainWindow.id)
                     NSApp.activate()
@@ -90,6 +101,14 @@ struct ActiveAccountCard: View {
                             colors: LimitStyle.session(usage?.session ?? 0, threshold: model.state.threshold))
                 LimitLegend(title: "Week", percent: usage?.weekly, reset: usage?.weeklyReset,
                             colors: LimitStyle.week(usage?.weekly ?? 0, threshold: model.state.threshold))
+                if let first = model.forecast(account)?.first {
+                    Text(first.weekly
+                         ? String(localized: "At this pace the week runs out about \(first.date.resetText)")
+                         : String(localized: "At this pace the 5-hour limit runs out about \(first.date.resetText)"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 0)
         }

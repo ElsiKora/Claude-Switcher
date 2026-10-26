@@ -22,6 +22,29 @@ struct SettingsView: View {
                         SettingsIcon(systemName: "bell.badge.fill", color: .red)
                     }
                 }
+                if model.state.notify {
+                    Toggle(isOn: Binding(get: { model.state.morningSummary }, set: { model.setMorningSummary($0) })) {
+                        Label {
+                            Text("Morning summary")
+                            Text("After 8 in the morning: the day before\u{2019}s API value, replies, switches and extra usage billed.")
+                        } icon: {
+                            SettingsIcon(systemName: "sun.horizon.fill", color: .yellow)
+                        }
+                    }
+                    Picker(selection: Binding(get: { model.state.extraAlert }, set: { model.setExtraAlert($0) })) {
+                        Text("Off").tag(Double?.none)
+                        ForEach([5.0, 10, 25, 50, 100, 250], id: \.self) { amount in
+                            Text(verbatim: amount.formatted()).tag(Double?.some(amount))
+                        }
+                    } label: {
+                        Label {
+                            Text("Extra usage alert")
+                            Text("When one account\u{2019}s extra usage billed today passes this, in its own currency.")
+                        } icon: {
+                            SettingsIcon(systemName: "creditcard.fill", color: .orange)
+                        }
+                    }
+                }
                 Toggle(isOn: Binding(get: { model.state.playSounds }, set: { model.setPlaySounds($0) })) {
                     Label {
                         Text("Sound when a switch finishes")
@@ -71,7 +94,7 @@ struct SettingsView: View {
                 Toggle(isOn: Binding(get: { model.state.autoSwitch }, set: { model.setAutoSwitch($0) })) {
                     Label {
                         Text("Switch when nearly full")
-                        Text("Moves Claude to the account with the most room left.")
+                        Text("Before the limit runs out at the pace it is being used, or at the threshold at the latest. Moves to the account whose free room would reset unused first, at a pause between replies when there is still room to wait.")
                     } icon: {
                         SettingsIcon(systemName: "gauge.with.dots.needle.67percent", color: .orange)
                     }
@@ -82,7 +105,7 @@ struct SettingsView: View {
                     }
                 } label: {
                     Label {
-                        Text("Nearly full at")
+                        Text("At the latest at")
                     } icon: {
                         SettingsIcon(systemName: "percent", color: .orange)
                     }
@@ -91,15 +114,33 @@ struct SettingsView: View {
                 Toggle(isOn: Binding(get: { model.state.spendWeekly }, set: { model.setSpendWeekly($0) })) {
                     Label {
                         Text("Use up expiring weeks")
-                        Text("Moves Claude to an account whose weekly limit resets within a day, mostly unused. Waits until no chat has been active for 15 minutes and no command is running.")
+                        Text("Moves Claude to an account whose weekly limit resets within a day, mostly unused, when that week is worth clearly more than re-reading every open chat. Waits until no chat has been active for 15 minutes and no command is running.")
                     } icon: {
                         SettingsIcon(systemName: "calendar.badge.clock", color: .purple)
+                    }
+                }
+                if model.state.autoSwitch || model.state.spendWeekly {
+                    LabeledContent {
+                        if model.isPaused {
+                            Button("Resume") { model.resumeAutoSwitch() }
+                        } else {
+                            Button("Pause for 2 Hours") { model.pauseAutoSwitch() }
+                        }
+                    } label: {
+                        Label {
+                            Text("Pause")
+                            Text(model.isPaused
+                                 ? String(localized: "Paused until \(model.state.pausedUntil?.resetText ?? "")")
+                                 : String(localized: "Nothing switches on its own for two hours."))
+                        } icon: {
+                            SettingsIcon(systemName: "pause.fill", color: .gray)
+                        }
                     }
                 }
             } header: {
                 Text("Automatic Switching")
             } footer: {
-                Text("Every switch restarts Claude. Both are off until you turn them on.")
+                Text("Every switch restarts Claude, and each open chat reads its context again in the new account, so the switcher moves as rarely as it can. With extra usage on, it moves earlier, since running out costs money, and never to an account that is already billing. Both are off until you turn them on.")
             }
 
             Section {
