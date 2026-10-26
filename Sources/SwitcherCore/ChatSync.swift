@@ -84,6 +84,46 @@ public enum ChatSync {
         return held
     }
 
+    // MARK: - Scheduled tasks
+
+    /// Claude keeps scheduled tasks per account and workspace
+    /// (`<root>/<account>/<org>/scheduled-tasks.json`) and runs only the
+    /// signed-in one's, so a switch carries the tasks of the account being
+    /// left into the one switched to. Tasks are matched by `id`: the source's
+    /// version wins; a task only the target has stays unless the source once
+    /// had it (then it was deleted there, and stays deleted). Returns how many
+    /// tasks the target has now, or nil when there was nothing to carry.
+    @discardableResult
+    public static func scheduledTasks(root: URL, from source: (account: String, org: String),
+                                      to target: (account: String, org: String), seenURL: URL) throws -> Int? {
+        let name = "scheduled-tasks.json"
+        let from = root.appending(path: source.account).appending(path: source.org).appending(path: name)
+        let toDir = root.appending(path: target.account).appending(path: target.org, directoryHint: .isDirectory)
+        let to = toDir.appending(path: name)
+        guard from != to, let data = try? Data(contentsOf: from),
+              let theirs = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let sourceTasks = theirs["scheduledTasks"] as? [[String: Any]] ?? []
+        let mine = (try? Data(contentsOf: to)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let targetTasks = mine?["scheduledTasks"] as? [[String: Any]] ?? []
+        guard !sourceTasks.isEmpty || !targetTasks.isEmpty else { return nil }
+        // Without ids there is nothing to match on: leave the target alone.
+        guard (sourceTasks + targetTasks).allSatisfy({ $0["id"] is String }) else { return nil }
+
+        var seen = Set((try? JSONDecoder().decode([String].self, from: Data(contentsOf: seenURL))) ?? [])
+        let sourceIDs = Set(sourceTasks.compactMap { $0["id"] as? String })
+        let kept = targetTasks.filter { t in
+            guard let id = t["id"] as? String else { return false }
+            return !sourceIDs.contains(id) && !seen.contains(id)
+        }
+        seen.formUnion(sourceIDs)
+        var out = mine ?? theirs
+        out["scheduledTasks"] = sourceTasks + kept
+        try FileManager.default.createDirectory(at: toDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try Files.writeAtomically(JSONSerialization.data(withJSONObject: out, options: [.sortedKeys]), to: to)
+        try Files.writeAtomically(JSONEncoder().encode(seen.sorted()), to: seenURL)
+        return sourceTasks.count + kept.count
+    }
+
     /// What Claude writes into a chat entry when a quit cuts off its turn.
     static let resumeKeys = ["interruptedByQuitAt", "interruptedAwaitingPerson", "interruptedUnseenResume"]
 

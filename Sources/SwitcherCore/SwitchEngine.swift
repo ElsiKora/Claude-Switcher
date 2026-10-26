@@ -13,6 +13,7 @@ public struct Store: Sendable {
     public var stateURL: URL { root.appending(path: "state.json") }
     public var backupsRoot: URL { root.appending(path: "backups", directoryHint: .isDirectory) }
     public var spacesSeenURL: URL { root.appending(path: "spaces-seen.json") }
+    public var scheduledSeenURL: URL { root.appending(path: "scheduled-tasks-seen.json") }
     public var safetyBackupRoot: URL { root.appending(path: "safety-backup", directoryHint: .isDirectory) }
 
     public func signInDir(_ account: String) -> URL {
@@ -86,6 +87,7 @@ public struct SwitchEngine: Sendable {
                 try ClaudeWeb.setActiveOrg(org, in: desktop.cookieFiles[0])
                 target.org = org
             }
+            if let left = accounts.first(where: { $0.id == active }) { try carryScheduledTasks(from: left, to: target) }
             var report = try importChats(into: target)
             report.settingsRestored = try AccountPrefs.restore(in: desktop, account: target.id, from: store.signInDir(target.id))
             report.cutOff = cutOff
@@ -104,7 +106,9 @@ public struct SwitchEngine: Sendable {
             guard var account = accounts.first(where: { $0.id == active }) else { throw SwitchError.noSavedSignIn }
             let cutOff = try markCutOffTurns(active, accounts)
             try ClaudeWeb.setActiveOrg(org, in: desktop.cookieFiles[0])
+            let left = account
             account.org = org
+            try carryScheduledTasks(from: left, to: account)
             var report = try importChats(into: account)
             report.cutOff = cutOff
             return report
@@ -177,6 +181,13 @@ public struct SwitchEngine: Sendable {
             report.projectsError = error.localizedDescription
         }
         return report
+    }
+
+    /// Scheduled tasks of the chats and of Cowork follow the switch.
+    private func carryScheduledTasks(from left: Account, to target: Account) throws {
+        for root in [desktop.sessionsRoot, desktop.spacesRoot] {
+            try ChatSync.scheduledTasks(root: root, from: (left.id, left.org), to: (target.id, target.org), seenURL: store.scheduledSeenURL)
+        }
     }
 
     private func withBackup<R>(_ change: (String?) throws -> R) throws -> R {

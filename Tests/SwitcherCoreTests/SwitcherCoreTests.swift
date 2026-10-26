@@ -126,6 +126,24 @@ private func write(_ text: String, _ url: URL) throws {
         #expect(FileManager.default.fileExists(atPath: target.appending(path: "local_4.json").path))
     }
 
+    @Test func scheduledTasksFollowTheSwitchAndStayDeleted() throws {
+        let root = try tempDir()
+        let seen = root.appending(path: "seen.json")
+        func tasks(_ path: String) throws -> [String] {
+            let o = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appending(path: path))) as? [String: Any]
+            return (o?["scheduledTasks"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }.sorted()
+        }
+        try write(#"{"scheduledTasks": [{"id": "daily"}, {"id": "weekly"}], "recordedSkips": {}}"#, root.appending(path: "a/o/scheduled-tasks.json"))
+        try write(#"{"scheduledTasks": [{"id": "own"}], "recordedSkips": {}}"#, root.appending(path: "b/o/scheduled-tasks.json"))
+        // A to B: B gets A's tasks and keeps its own.
+        try ChatSync.scheduledTasks(root: root, from: ("a", "o"), to: ("b", "o"), seenURL: seen)
+        #expect(try tasks("b/o/scheduled-tasks.json") == ["daily", "own", "weekly"])
+        // "weekly" is deleted in B; back to A, it does not come back.
+        try write(#"{"scheduledTasks": [{"id": "daily"}, {"id": "own"}]}"#, root.appending(path: "b/o/scheduled-tasks.json"))
+        try ChatSync.scheduledTasks(root: root, from: ("b", "o"), to: ("a", "o"), seenURL: seen)
+        #expect(try tasks("a/o/scheduled-tasks.json") == ["daily", "own"])
+    }
+
     @Test func resumeMarkersMoveWithTheChat() throws {
         let root = try tempDir()
         let interrupted = #"{"lastActivityAt": 5, "interruptedByQuitAt": 99, "interruptedAwaitingPerson": false, "remoteMcpServersConfig": [{"uuid": "x"}]}"#

@@ -35,6 +35,9 @@ public enum CutOffTurns {
         var cli: String?
         var lastActivity: Int64
         var archived: Bool
+        /// Timers (/loop and other crons) and background tasks the chat had
+        /// armed when Claude quit, as Claude records them on its way out.
+        var armedAtQuit: (at: Date, count: Int)?
     }
 
     /// Marks the main chats of `account/org` that a quit cut off or whose side
@@ -56,12 +59,16 @@ public enum CutOffTurns {
             entries[id] = Entry(
                 url: url, object: object, id: id, parent: parent, cli: object.string("cliSessionId"),
                 lastActivity: object.raw("lastActivityAt").flatMap { Int64(String(decoding: $0, as: UTF8.self)) } ?? 0,
-                archived: object.raw("isArchived").map { String(decoding: $0, as: UTF8.self) } == "true")
+                archived: object.raw("isArchived").map { String(decoding: $0, as: UTF8.self) } == "true",
+                armedAtQuit: object.raw("armedWorkAtQuit").flatMap(armedWork))
         }
 
         func cutOff(_ e: Entry) -> Bool {
             guard !e.archived, let cli = e.cli, live.ids.contains(cli) else { return false }
             if live.runningCommands.contains(cli) { return true }
+            // Timers like /loop live in the Claude Code process and stop with
+            // it: the chat continues and sets them up again.
+            if let armed = e.armedAtQuit, armed.count > 0, now.timeIntervalSince(armed.at) < 15 * 60 { return true }
             guard let transcript = transcript(cli, in: projects) else { return false }
             if let since = inFlightSince(transcript), now.timeIntervalSince(since) < window { return true }
             return backgroundTasksRunning(transcript, since: live.startedAt[cli] ?? now)
@@ -117,6 +124,14 @@ public enum CutOffTurns {
             marked.append((last, Chat(id: id, title: object.string("title") ?? "", sideSessions: 0)))
         }
         return marked.sorted { $0.0 > $1.0 }.map(\.1)
+    }
+
+    /// `armedWorkAtQuit`: `{at, cronCount, durableCronCount, backgroundTaskCount}`.
+    static func armedWork(_ raw: Data) -> (at: Date, count: Int)? {
+        guard let o = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+              let at = (o["at"] as? NSNumber)?.doubleValue else { return nil }
+        let count = ["cronCount", "durableCronCount", "backgroundTaskCount"].reduce(0) { $0 + ((o[$1] as? NSNumber)?.intValue ?? 0) }
+        return (Date(timeIntervalSince1970: at / 1000), count)
     }
 
     static func transcript(_ cliSessionID: String, in projects: URL) -> URL? {
