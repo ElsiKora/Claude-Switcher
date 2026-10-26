@@ -10,8 +10,10 @@ import WebKit
 /// own Connect buttons.
 struct ClaudeAIPage: Identifiable, Equatable {
     let account: Account
+    /// The workspace to open, for an account with several.
+    var org: String?
     let path: String
-    var id: String { account.id + path }
+    var id: String { account.id + (org ?? "") + path }
 }
 
 struct ClaudeAIPageSheet: View {
@@ -51,7 +53,7 @@ struct ClaudeAIPageSheet: View {
         }
         .frame(minWidth: 900, idealWidth: 1000, minHeight: 640, idealHeight: 760)
         .task {
-            do { cookies = try await model.webCookies(for: page.account) } catch { failure = error.localizedDescription }
+            do { cookies = try await model.webCookies(for: page.account, org: page.org) } catch { failure = error.localizedDescription }
         }
     }
 }

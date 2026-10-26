@@ -136,7 +136,8 @@ enum Demo {
         full.plugins = plugins
         var partial = CloudSetup()
         partial.connectors = [all[0], connector("Linear", "mcp.linear.app", connected: false)]
-        return ["a1": full, "a2": partial, "a3": full]
+        // Kept per account and workspace, like the real ones.
+        return ["a1/org-a1": full, "a2/org-a2": partial, "a2/org-a2p": full, "a3/org-a3": full]
     }()
 
     static let activity: [Activity] = [

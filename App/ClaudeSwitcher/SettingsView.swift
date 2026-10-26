@@ -75,13 +75,13 @@ struct SettingsView: View {
                 }
                 Picker(selection: Binding(get: { model.state.reference }, set: { model.setReference($0) })) {
                     Text("Most set up").tag(String?.none)
-                    ForEach(model.accounts) { a in
-                        Text(a.displayName).tag(Optional(a.id))
+                    ForEach(model.state.seats) { seat in
+                        Text(seat.displayName).tag(Optional(seat.id))
                     }
                 } label: {
                     Label {
-                        Text("Reference account")
-                        Text("Other accounts show which of its connectors, skills and plugins they lack.")
+                        Text("Reference")
+                        Text("Other accounts and workspaces show which of its connectors, skills and plugins they lack.")
                     } icon: {
                         SettingsIcon(systemName: "star.fill", color: .yellow)
                     }

@@ -158,35 +158,38 @@ final class AppModel {
         }
     }
 
-    /// The account the others are set up like: the chosen one, else the one
-    /// with the most connectors, skills and plugins.
-    var referenceAccount: Account? {
-        if let chosen = state.account(state.reference) { return chosen }
-        return accounts.max { (cloudSetups[$0.id]?.count ?? 0) < (cloudSetups[$1.id]?.count ?? 0) }
+    /// The account and workspace the others are set up like: the chosen
+    /// one, else the one with the most connectors, skills and plugins.
+    /// Connectors, plugins and skills live in a workspace on claude.ai, so
+    /// the reference is a workspace, and so is every comparison and copy.
+    var referenceSeat: Seat? {
+        if let chosen = state.seat(state.reference) { return chosen }
+        return state.seats.max { (cloudSetups[$0.id]?.count ?? 0) < (cloudSetups[$1.id]?.count ?? 0) }
     }
 
-    /// What `account` lacks compared with the reference account.
-    func setupGaps(_ account: Account) -> CloudSetup.Gaps? {
-        guard let reference = referenceAccount, reference.id != account.id,
-              let mine = cloudSetups[account.id], let theirs = cloudSetups[reference.id] else { return nil }
+    /// What `seat` lacks compared with the reference.
+    func setupGaps(_ seat: Seat) -> CloudSetup.Gaps? {
+        guard let reference = referenceSeat, reference.id != seat.id,
+              let mine = cloudSetups[seat.id], let theirs = cloudSetups[reference.id] else { return nil }
         return mine.gaps(from: theirs)
     }
 
-    /// Reads the claude.ai setup of every account with a session, at most every five minutes unless forced.
+    /// Reads the claude.ai setup of every account in every workspace, at most every five minutes unless forced.
     func refreshCloudSetups(force: Bool = false) async {
         guard !isDemo else { return }
         let ua = AppInfo.webUserAgent
-        for account in accounts where hasSignIn(account) {
-            if !force, let at = cloudReadAt[account.id], now.timeIntervalSince(at) < 300 { continue }
-            cloudReadAt[account.id] = now
-            let store = cookieStore(for: account)
+        for seat in state.seats where hasSignIn(seat.account) {
+            if !force, let at = cloudReadAt[seat.id], now.timeIntervalSince(at) < 300 { continue }
+            cloudReadAt[seat.id] = now
+            let store = cookieStore(for: seat.account)
+            let org = seat.orgID
             do {
-                cloudSetups[account.id] = try await Task.detached {
-                    try await CloudSetup.read(ClaudeWeb(cookieStore: store, userAgent: ua), org: account.org)
+                cloudSetups[seat.id] = try await Task.detached {
+                    try await CloudSetup.read(ClaudeWeb(cookieStore: store, userAgent: ua), org: org)
                 }.value
-                cloudErrors[account.id] = nil
+                cloudErrors[seat.id] = nil
             } catch {
-                cloudErrors[account.id] = error.localizedDescription
+                cloudErrors[seat.id] = error.localizedDescription
             }
         }
     }
@@ -710,8 +713,8 @@ final class AppModel {
 
     /// Opens claude.ai's Connectors page as `account`, to sign in to connectors
     /// there. Its setup is read again once the page is closed.
-    func connect(_ account: Account) {
-        claudeAIPage = ClaudeAIPage(account: account, path: "/settings/connectors")
+    func connect(_ seat: Seat) {
+        claudeAIPage = ClaudeAIPage(account: seat.account, org: seat.org == nil ? nil : seat.orgID, path: "/settings/connectors")
     }
 
     func closeClaudeAIPage() {
@@ -720,9 +723,16 @@ final class AppModel {
     }
 
     /// An account's claude.ai cookies, decrypted off the main thread.
-    func webCookies(for account: Account) async throws -> [HTTPCookie] {
+    /// With `org`, claude.ai opens in that workspace of the account.
+    func webCookies(for account: Account, org: String? = nil) async throws -> [HTTPCookie] {
         let store = cookieStore(for: account)
-        return try await Task.detached { try ClaudeWeb.webCookies(cookieStore: store) }.value
+        let cookies = try await Task.detached { try ClaudeWeb.webCookies(cookieStore: store) }.value
+        guard let org else { return cookies }
+        return cookies.map { cookie in
+            guard cookie.name == "lastActiveOrg", var properties = cookie.properties else { return cookie }
+            properties[.value] = org
+            return HTTPCookie(properties: properties) ?? cookie
+        }
     }
 
     /// Opens a claude.ai page inside Claude, in the account it is signed in with.
@@ -739,30 +749,43 @@ final class AppModel {
             : engine.store.signInDir(account.id).appending(path: "Cookies")
     }
 
-    /// Brings `account` up to the reference account's claude.ai setup.
-    func copySetup(to account: Account) async {
-        guard let reference = referenceAccount, reference.id != account.id, copyingSetupTo == nil else { return }
-        copyingSetupTo = account.id
+    /// Brings a workspace up to the reference's claude.ai setup, then reads
+    /// it back from claude.ai to tell what is really there.
+    func copySetup(to seat: Seat) async {
+        guard let reference = referenceSeat, reference.id != seat.id, copyingSetupTo == nil else { return }
+        copyingSetupTo = seat.id
         defer { copyingSetupTo = nil }
-        let from = cookieStore(for: reference)
-        let to = cookieStore(for: account)
+        let from = cookieStore(for: reference.account)
+        let to = cookieStore(for: seat.account)
+        let (fromOrg, toOrg) = (reference.orgID, seat.orgID)
         let ua = AppInfo.webUserAgent
         do {
             let result = try await Task.detached {
                 try await SetupCopy(
-                    reference: ClaudeWeb(cookieStore: from, userAgent: ua), referenceOrg: reference.org,
-                    target: ClaudeWeb(cookieStore: to, userAgent: ua), targetOrg: account.org
+                    reference: ClaudeWeb(cookieStore: from, userAgent: ua), referenceOrg: fromOrg,
+                    target: ClaudeWeb(cookieStore: to, userAgent: ua), targetOrg: toOrg
                 ).run()
             }.value
-            setupCopies[account.id] = result
-            var text = String(localized: "Set up \(account.displayName) like \(reference.displayName): \(result.connectors.count) connectors, \(result.plugins.count) plugins, \(result.skills.count) skills, \(result.toolSettings) tool settings.")
+            setupCopies[seat.id] = result
+            var text = String(localized: "Set up \(seat.displayName) like \(reference.displayName): \(result.connectors.count) connectors, \(result.plugins.count) plugins, \(result.skills.count) skills, \(result.toolSettings) tool settings.")
             if !result.failed.isEmpty { text += " " + String(localized: "Not done: \(result.failed.joined(separator: ", ")).") }
             record(text)
         } catch {
             fail(String(localized: "Could not copy the setup: \(error.localizedDescription)"))
         }
         await refreshCloudSetups(force: true)
+        // What claude.ai says now, not what the copy meant to do.
+        if let gaps = setupGaps(seat) {
+            let left = gaps.missingConnectors.map(\.name) + gaps.plugins.map(\.name) + gaps.skills.map(\.name)
+            setupVerified[seat.id] = left.isEmpty
+                ? String(localized: "Checked on claude.ai: everything \(reference.displayName) has is in \(seat.displayName) now.")
+                : String(localized: "Checked on claude.ai: still missing \(left.joined(separator: ", ")).")
+            record(setupVerified[seat.id]!)
+        }
     }
+
+    /// What claude.ai showed after the last copy into each workspace.
+    private(set) var setupVerified: [String: String] = [:]
 
     func dismissCutOff() { cutOff = [] }
 
@@ -988,6 +1011,7 @@ final class AppModel {
         s.extraTracks = Dictionary(s.extraTracks.map { (key($0.key), $0.value) }, uniquingKeysWith: { a, _ in a })
         s.extraByDay = Dictionary(s.extraByDay.map { (key($0.key), $0.value) }, uniquingKeysWith: { a, _ in a })
         s.spending = s.spending.map(key)
+        s.reference = s.reference.map(key)
         s.lastFrom = s.lastFrom.map(key)
         return s
     }

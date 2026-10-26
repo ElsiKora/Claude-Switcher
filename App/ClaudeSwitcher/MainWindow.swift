@@ -26,8 +26,8 @@ struct MainWindow: View {
                         AccountRow(account: account)
                             .tag(SidebarItem.account(account.id))
                             .contextMenu {
-                                Button("Use as Reference Account") { model.setReference(account.id) }
-                                    .disabled(model.referenceAccount?.id == account.id)
+                                Button("Use as Reference Account") { model.setReference(model.state.seat(of: account)?.id) }
+                                    .disabled(model.referenceSeat?.id == model.state.seat(of: account)?.id)
                             }
                     }
                 }

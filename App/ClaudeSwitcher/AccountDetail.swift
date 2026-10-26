@@ -42,7 +42,9 @@ struct AccountDetail: View {
                 }
             }
 
-            SetupSection(account: account)
+            ForEach(model.state.seats.filter { $0.account.id == account.id }) { seat in
+                SetupSection(seat: seat)
+            }
 
             if !isActive {
                 Section {
@@ -128,40 +130,42 @@ struct AccountDetail: View {
 /// live from claude.ai, and the copy that brings it up to date.
 struct SetupSection: View {
     @Environment(AppModel.self) private var model
-    let account: Account
+    let seat: Seat
     @State private var confirming = false
 
+    private var account: Account { seat.account }
+
     var body: some View {
-        if let reference = model.referenceAccount, model.accounts.count > 1 {
+        if let reference = model.referenceSeat, model.state.seats.count > 1 {
             Section {
                 LabeledContent {
-                    if reference.id != account.id {
-                        Button("Use This Account") { model.setReference(account.id) }
+                    if reference.id != seat.id {
+                        Button("Use as Reference") { model.setReference(seat.id) }
                     }
                 } label: {
                     Label {
-                        if reference.id == account.id {
+                        if reference.id == seat.id {
                             Text("Reference account")
-                            Text("The other accounts are compared with this one.")
+                            Text("The other accounts and workspaces are compared with this one.")
                         } else {
                             Text("Compared with \(reference.displayName)")
-                            Text("Connectors, plugins and skills live on claude.ai in each account.")
+                            Text("Connectors, plugins and skills live on claude.ai in each account and workspace.")
                         }
                     } icon: {
                         SettingsIcon(systemName: "star.fill", color: .yellow)
                     }
                 }
-                if let error = model.cloudErrors[account.id] {
+                if let error = model.cloudErrors[seat.id] {
                     Label("Could not read claude.ai: \(error)", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 }
-                if let mine = model.cloudSetups[account.id] {
-                    let gaps = model.setupGaps(account)
+                if let mine = model.cloudSetups[seat.id] {
+                    let gaps = model.setupGaps(seat)
                     connectorsRow(mine, gaps)
                     pluginsRow(mine, gaps)
                     skillsRow(mine, gaps)
-                    if let gaps, reference.id != account.id { copyRow(reference, gaps) }
-                } else if model.cloudErrors[account.id] == nil {
+                    if let gaps, reference.id != seat.id { copyRow(reference, gaps) }
+                } else if model.cloudErrors[seat.id] == nil {
                     LabeledContent("Reading claude.ai\u{2026}") { ProgressView().controlSize(.small) }
                 }
                 LabeledContent {
@@ -176,17 +180,17 @@ struct SetupSection: View {
                     }
                 }
             } header: {
-                Text("Setup")
+                if let org = seat.org { Text("Setup in \(org.label)") } else { Text("Setup") }
             } footer: {
-                if (model.cloudSetups[account.id]?.connectors.contains { !$0.connected } ?? false) {
-                    Text("Connect opens claude.ai\u{2019}s Connectors page here, signed in as \(account.displayName), whichever account Claude is using. Sign in to each connector with its Connect button.")
+                if (model.cloudSetups[seat.id]?.connectors.contains { !$0.connected } ?? false) {
+                    Text("Connect opens claude.ai\u{2019}s Connectors page here, as \(seat.displayName), whichever account Claude is using. Sign in to each connector with its Connect button.")
                 }
             }
-            .task(id: account.id) { await model.refreshCloudSetups() }
-            .confirmationDialog("Set up \(account.displayName) like \(reference.displayName)?", isPresented: $confirming) {
-                Button("Copy Setup") { Task { await model.copySetup(to: account) } }
+            .task(id: seat.id) { await model.refreshCloudSetups() }
+            .confirmationDialog("Set up \(seat.displayName) like \(reference.displayName)?", isPresented: $confirming) {
+                Button("Copy Setup") { Task { await model.copySetup(to: seat) } }
             } message: {
-                Text("Adds \(reference.displayName)\u{2019}s missing connectors to \(account.displayName)\u{2019}s claude.ai account with their tool switches, approvals and permissions, and turns on the same plugins and skills, the way claude.ai\u{2019}s Settings do. Nothing is removed or turned off. You then sign in to each new connector in Claude.")
+                Text("Adds \(reference.displayName)\u{2019}s missing connectors to \(seat.displayName) on claude.ai with their tool switches, approvals and permissions, and turns on the same plugins and skills, the way claude.ai\u{2019}s Settings do. Nothing is removed or turned off. Afterwards the switcher reads claude.ai again and shows what is there. You then sign in to each new connector.")
             }
         }
     }
@@ -207,7 +211,7 @@ struct SetupSection: View {
                 }
                 if let action, let perform {
                     Button(action, action: perform)
-                } else if let action, account.id == model.active {
+                } else if let action, seat.id == model.activeSeatID {
                     Button(action) { model.openInClaude(path) }
                 }
             }
@@ -235,7 +239,7 @@ struct SetupSection: View {
                  state: missing.isEmpty && signIn.isEmpty ? nil : summary(missing: missing.count, signIn: signIn.count),
                  attention: !missing.isEmpty || !signIn.isEmpty,
                  action: signIn.isEmpty ? nil : "Connect\u{2026}", path: "/settings/connectors",
-                 perform: model.hasSignIn(account) ? { model.connect(account) } : nil,
+                 perform: model.hasSignIn(account) ? { model.connect(seat) } : nil,
                  notes: [("Missing", missing.map(\.name)), ("Needs sign-in", signIn.map(\.name))])
     }
 
@@ -271,18 +275,20 @@ struct SetupSection: View {
                          ("Not offered to this account", unavailable.map(\.name))])
     }
 
-    private func copyRow(_ reference: Account, _ gaps: CloudSetup.Gaps) -> some View {
+    private func copyRow(_ reference: Seat, _ gaps: CloudSetup.Gaps) -> some View {
         LabeledContent {
-            if model.copyingSetupTo == account.id {
+            if model.copyingSetupTo == seat.id {
                 ProgressView().controlSize(.small)
             } else {
                 Button("Copy Setup\u{2026}") { confirming = true }
-                    .disabled(model.copyingSetupTo != nil || gaps.copyable == 0 || !model.hasSignIn(account) || !model.hasSignIn(reference))
+                    .disabled(model.copyingSetupTo != nil || gaps.copyable == 0 || !model.hasSignIn(account) || !model.hasSignIn(reference.account))
             }
         } label: {
             Label {
                 Text("Set up like \(reference.displayName)")
-                if let result = model.setupCopies[account.id] {
+                if let verified = model.setupVerified[seat.id] {
+                    Text(verified)
+                } else if let result = model.setupCopies[seat.id] {
                     Text(copySummary(result))
                 } else if gaps.copyable == 0 {
                     Text("Nothing left to copy.")
