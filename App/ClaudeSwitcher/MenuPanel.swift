@@ -342,8 +342,8 @@ struct PanelNotices: View {
                 let held = model.state.heldChats.count
                 NoticeRow(systemImage: "person.badge.plus", tint: .blue,
                           text: held == 0
-                              ? String(localized: "Adding accounts. Chats wait until you press Done.")
-                              : String(localized: "Adding accounts. \(held) chats wait to continue in the account you finish on.")) {
+                              ? String(localized: "Adding accounts. Chats wait until you press Done. This ends on its own when the limit runs out or 30 minutes after the last account.")
+                              : String(localized: "Adding accounts. \(held) chats wait to continue in the account you finish on. This ends on its own when the limit runs out or 30 minutes after the last account.")) {
                     HStack(spacing: 10) {
                         Button("Add Another") { Task { await model.addAccount() } }
                         Button("Done") { Task { await model.setHoldChats(false) } }

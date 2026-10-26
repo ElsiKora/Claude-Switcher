@@ -406,13 +406,21 @@ final class AppModel {
     /// the limit runs out within minutes, else at the next pause between
     /// replies, waiting at most `Policy.pauseWait`.
     private func switchIfDue() async {
-        // Only "use up expiring weeks" waits for idle chats, so only it needs the process list.
-        let live = state.spendWeekly ? await Task.detached { ClaudeProcess.liveConversations() }.value : LiveConversations()
+        // Only what waits for idle chats needs the process list: "use up
+        // expiring weeks" and the end of adding several accounts.
+        let live = state.spendWeekly || state.holdChats ? await Task.detached { ClaudeProcess.liveConversations() }.value : LiveConversations()
         var context = Policy.Context(claudeRunning: claudeRunning, lastChat: lastChat,
                                      commandRunning: !live.runningCommands.isEmpty, now: now)
+        // In the middle of adding an account, nothing moves on its own.
+        if state.holdChats, addingSince != nil || phase != nil { return }
         guard var decision = Policy.autoTarget(state, active: activeSeatID, context: context) else {
             waitingSince = nil
             warnIfBillingWithoutRoom()
+            noteNoRoom()
+            if Policy.finishAdding(state, context: context) {
+                record(String(localized: "Done adding accounts on its own: no account was added for 30 minutes."))
+                await setHoldChats(false)
+            }
             return
         }
         if decision.1 == .spendWeekly {
@@ -430,6 +438,27 @@ final class AppModel {
         }
         waitingSince = nil
         await switchTo(decision.0, cause: decision.1)
+    }
+
+    /// The no-room moment already told, so each is told once.
+    private var noRoomTold: Policy.NoRoom?
+
+    /// The active account has run out and no account has room: says so, and
+    /// which account has room again first.
+    private func noteNoRoom() {
+        guard state.autoSwitch, let stuck = Policy.noRoom(state, active: activeSeatID, now: now) else {
+            noRoomTold = nil
+            return
+        }
+        guard stuck != noRoomTold else { return }
+        noRoomTold = stuck
+        let text = if let next = stuck.next {
+            String(localized: "\(stuck.seat.displayName) is nearly full and no account has room to switch to. \(next.seat.displayName) has room again at \(next.at.formatted(date: .omitted, time: .shortened)).")
+        } else {
+            String(localized: "\(stuck.seat.displayName) is nearly full and no account has room to switch to.")
+        }
+        record(text)
+        notifier.noRoom(stuck, text: text)
     }
 
     /// What a percent of the signed-in account's weekly limit cost lately at
@@ -600,10 +629,19 @@ final class AppModel {
     func switchTo(_ target: Seat, cause: SwitchCause = .byHand) async {
         let from = activeSeatID
         guard target.id != from else { return }
+        // Running out while adding several accounts ends the mode: the held
+        // chats continue on the account switched to.
+        let finishing = state.holdChats && cause == .nearlyFull
+        let held = finishing ? state.heldChats : []
+        if finishing {
+            state.holdChats = false
+            save()
+        }
         let accounts = state.accounts
         let mirror = state.mirrorSettings
         let name = target.displayName
         let done: (SwitchReport) -> Void = { [weak self] report in
+            if finishing { self?.record(String(localized: "Done adding accounts on its own: the active account was nearly full.")) }
             self?.record(Self.describe(switchTo: name, cause: cause, report: report))
             self?.cutOff = report.cutOff
             self?.continueRest(report.cutOff)
@@ -611,14 +649,24 @@ final class AppModel {
         let ok: Bool
         if target.account.id == active {
             let org = target.orgID
-            ok = await restart(.switching(to: name)) { engine in try engine.switchOrg(to: org, accounts: accounts) } done: { done($0) }
+            ok = await restart(.switching(to: name)) { engine in try engine.switchOrg(to: org, accounts: accounts, held: held) } done: { done($0) }
         } else {
             let org = target.org == nil ? nil : target.orgID
             ok = await restart(.switching(to: name)) { engine in
-                try engine.switchFiles(to: target.account, org: org, accounts: accounts, mirrorSettings: mirror)
+                try engine.switchFiles(to: target.account, org: org, accounts: accounts, mirrorSettings: mirror, held: held)
             } done: { done($0) }
         }
-        guard ok else { return }
+        guard ok else {
+            if finishing {
+                state.holdChats = true
+                save()
+            }
+            return
+        }
+        if finishing {
+            state.heldChats = []
+            state.holdSince = nil
+        }
         state.update(target.account.id) { a in
             a.org = target.orgID
             if let org = a.orgs?.first(where: { $0.id == target.orgID }) { a.usage = org.usage }
@@ -643,6 +691,7 @@ final class AppModel {
 
     func addAccount() async {
         addingFrom = activeAccount
+        if state.holdChats { state.holdSince = .now }
         let accounts = state.accounts
         let ok = await restart(.adding) { engine in try engine.prepareAdd(accounts: accounts) } done: { [weak self] chats in
             self?.cutOff = chats
@@ -804,9 +853,10 @@ final class AppModel {
     func setHoldChats(_ on: Bool) async {
         guard on != state.holdChats, !isBusy else { return }
         state.holdChats = on
+        state.holdSince = on ? .now : nil
         save()
         if on {
-            record(String(localized: "Adding several accounts: chats wait until this is turned off."))
+            record(String(localized: "Adding several accounts: chats wait until you press Done, or until the limit runs out or 30 minutes pass without a new account."))
             return
         }
         let ids = state.heldChats
@@ -824,6 +874,7 @@ final class AppModel {
         } else {
             // Nothing was continued: keep holding, so the chats are not lost.
             state.holdChats = true
+            state.holdSince = .now
             save()
         }
     }

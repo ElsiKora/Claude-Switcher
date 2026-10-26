@@ -356,16 +356,18 @@ private func write(_ text: String, _ url: URL) throws {
         let at = "2033-05-18T03:30:00.000Z" // three minutes before `now`
         let working = #"{"type":"assistant","timestamp":"\#(at)","message":{"stop_reason":"tool_use"}}"#
         let done = #"{"type":"assistant","timestamp":"\#(at)","message":{"stop_reason":"end_turn"}}"#
+        let limit = #"{"type":"assistant","timestamp":"\#(at)","error":"rate_limit","isApiErrorMessage":true,"message":{"model":"<synthetic>","stop_reason":"stop_sequence"}}"#
         func chat(_ id: String, _ records: [String], parent: String? = nil, active: Int = 1) throws {
             let spawned = parent.map { #", "spawnedFrom": {"sessionId": "local_\#($0)"}"# } ?? ""
             try write(#"{"cliSessionId": "\#(id)", "title": "T\#(id)", "lastActivityAt": \#(active)\#(spawned)}"#,
                       desktop.sessionsRoot.appending(path: "A/O/local_\(id).json"))
             try write(transcript(records), projects.appending(path: "-p/\(id).jsonl"))
         }
-        // A lead waiting on its side sessions; one of them, and its own side session, were working.
+        // A lead waiting on its side sessions; one of them, and its own side session, were working,
+        // and the limit stopped another, which is continued itself too.
         try chat("lead", [done], active: 5)
         try chat("side1", [working], parent: "lead")
-        try chat("side2", [done], parent: "lead")
+        try chat("side2", [working, limit], parent: "lead")
         try chat("side1a", [#"{"type":"user","timestamp":"\#(at)","message":{"content":[{"type":"tool_result"}]}}"#], parent: "side1")
         // A chat on its own, waiting on an hour-long command since 01:00.
         try chat("solo", [#"{"type":"assistant","timestamp":"2033-05-18T01:00:00.000Z","message":{"stop_reason":"tool_use"}}"#], active: 9)
@@ -373,13 +375,12 @@ private func write(_ text: String, _ url: URL) throws {
         try chat("asleep", [working])
         try chat("idle", [done])
         // Stopped by the account's limit; its process went to sleep since.
-        let limit = #"{"type":"assistant","timestamp":"\#(at)","error":"rate_limit","isApiErrorMessage":true,"message":{"model":"<synthetic>","stop_reason":"stop_sequence"}}"#
         try chat("limited", [working, limit], active: 1_999_999_820_000)
 
         let live = LiveConversations(ids: ["lead", "side1", "side2", "side1a", "solo", "idle"])
         let marked = try CutOffTurns.mark(desktop: desktop, account: "A", org: "O", live: live, projects: projects, now: now)
-        #expect(marked.map(\.id) == ["limited", "solo", "lead"])
-        #expect(marked.map(\.sideSessions) == [0, 0, 2])
+        #expect(marked.map(\.id) == ["limited", "solo", "lead", "side2"])
+        #expect(marked.map(\.sideSessions) == [0, 0, 3, 0])
         let lead = try JSONObjectText(contentsOf: desktop.sessionsRoot.appending(path: "A/O/local_lead.json"))
         #expect(lead.raw("interruptedByQuitAt") == Data("2000000000000".utf8))
         #expect(lead.raw("interruptedAwaitingPerson") == Data("false".utf8))

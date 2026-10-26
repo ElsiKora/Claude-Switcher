@@ -13,7 +13,9 @@ public import Foundation
 /// process) or a background agent or workflow (launched in the transcript
 /// by this process, with no completion notification after it). A chat whose
 /// turn the account's usage limit stopped was cut off too, whether or not
-/// its process still runs: it waits for an account with room. Side sessions are not marked themselves: the main chat that started
+/// its process still runs: it waits for an account with room. Side sessions
+/// are not marked themselves, except those the limit stopped (a main chat
+/// reads the limit's reset time in them and waits for it): the main chat that started
 /// them is, so it checks on its sessions and continues them, the way the
 /// person would after a restart. A cut-off chat without a main chat is
 /// marked itself. Claude did not mark any chat on the first real run, so the
@@ -66,21 +68,22 @@ public enum CutOffTurns {
         }
 
         let since = Int64((now.timeIntervalSince1970 - window) * 1000)
-        func cutOff(_ e: Entry) -> Bool {
-            guard !e.archived, let cli = e.cli else { return false }
+        enum Cut { case work, limit }
+        func cutOff(_ e: Entry) -> Cut? {
+            guard !e.archived, let cli = e.cli else { return nil }
             let isLive = live.ids.contains(cli)
-            guard isLive || e.lastActivity >= since else { return false }
+            guard isLive || e.lastActivity >= since else { return nil }
             let transcript = transcript(cli, in: projects)
             let turn = transcript.map(lastTurn) ?? .ended
-            if case let .stoppedByLimit(at) = turn { return now.timeIntervalSince(at) < window }
-            guard isLive else { return false }
-            if live.runningCommands.contains(cli) { return true }
+            if case let .stoppedByLimit(at) = turn { return now.timeIntervalSince(at) < window ? .limit : nil }
+            guard isLive else { return nil }
+            if live.runningCommands.contains(cli) { return .work }
             // Timers like /loop live in the Claude Code process and stop with
             // it: the chat continues and sets them up again.
-            if let armed = e.armedAtQuit, armed.count > 0, now.timeIntervalSince(armed.at) < 15 * 60 { return true }
-            if case let .inFlight(at) = turn, now.timeIntervalSince(at) < window { return true }
-            guard let transcript else { return false }
-            return backgroundTasksRunning(transcript, since: live.startedAt[cli] ?? now)
+            if let armed = e.armedAtQuit, armed.count > 0, now.timeIntervalSince(armed.at) < 15 * 60 { return .work }
+            if case let .inFlight(at) = turn, now.timeIntervalSince(at) < window { return .work }
+            guard let transcript else { return nil }
+            return backgroundTasksRunning(transcript, since: live.startedAt[cli] ?? now) ? .work : nil
         }
         /// The main chat at the top of a chat's chain of side sessions.
         func main(_ id: String) -> String {
@@ -93,13 +96,17 @@ public enum CutOffTurns {
         }
 
         var cutUnder: [String: Int] = [:]
-        for e in entries.values where cutOff(e) {
+        var limitedSides: Set<String> = []
+        for e in entries.values {
+            guard let cut = cutOff(e) else { continue }
             let top = main(e.id)
             cutUnder[top, default: 0] += top == e.id ? 0 : 1
+            if cut == .limit, top != e.id { limitedSides.insert(e.id) }
         }
 
         var marked: [(Int64, Chat)] = []
-        for (id, sides) in cutUnder {
+        for id in Set(cutUnder.keys).union(limitedSides) {
+            let sides = cutUnder[id] ?? 0
             guard var e = entries[id] else { continue }
             let chat = Chat(id: String(id.dropFirst("local_".count)), title: e.object.string("title") ?? "", sideSessions: sides)
             if !e.object.contains("interruptedByQuitAt") {

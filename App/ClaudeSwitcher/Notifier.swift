@@ -65,6 +65,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
              switchTo: nil)
     }
 
+    /// The signed-in account is nearly full and no account has room to move to.
+    func noRoom(_ stuck: Policy.NoRoom, text: String) {
+        guard AppModel.shared.state.notify else { return }
+        post("noroom-\(stuck.seat.id)-\(Int((stuck.next?.at ?? .distantFuture).timeIntervalSince1970))",
+             title: String(localized: "No account has room"), body: text, switchTo: nil)
+    }
+
     /// Yesterday in one line, each morning.
     func morningSummary(apiValue: Double, replies: Int, switches: Int, billed: [String]) {
         var body = String(localized: "\(dollars(apiValue)) API value in \(replies.formatted()) replies, \(switches) switches.")

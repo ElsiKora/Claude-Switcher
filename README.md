@@ -77,9 +77,9 @@ It runs in the menu bar, reads each account's 5-hour and weekly limits from Anth
 
 - ✨ **One-click switch**: quits Claude cleanly (the same shutdown as quitting it yourself), swaps the sign-in and opens Claude again.
 - ✨ **Add Account**: restarts Claude on its sign-in screen and keeps your current sign-in. Sign in with the other account and Claude Switcher picks it up.
-- ✨ **Add Several Accounts**: chats a restart cuts off wait while you add accounts one after another; press Done on the last one and every waiting chat continues there.
+- ✨ **Add Several Accounts**: chats a restart cuts off wait while you add accounts one after another; press Done on the last one and every waiting chat continues there. Forgot Done? The mode ends on its own when the limit runs out (moving to the account with room) or 30 idle minutes after the last account.
 - ✨ **Shared chats and projects**: every account's Claude Code chat list holds the same chats. Chats you deleted stay deleted.
-- ✨ **Work continues after a switch**: chats that were mid-turn, running a command, waiting on a background agent, or stopped by the usage limit are marked as interrupted. Claude continues the main chats, and they check on their side sessions.
+- ✨ **Work continues after a switch**: chats that were mid-turn, running a command, waiting on a background agent, or stopped by the usage limit are marked as interrupted. When every account is out, the journal and a notification say which account has room again first, and when. Claude continues the main chats, and they check on their side sessions.
 - ✨ **Live limits**: both limits of every account, as rings in the menu bar and the window, with their reset times and when they run out at the pace of the last checks.
 - ✨ **Automatic switching** (optional), built to switch rarely, since every switch makes each open chat read its context again in the new account:
   - before the limit runs out at the current pace, or at your threshold at the latest; earlier on an account with extra usage on;
@@ -262,7 +262,7 @@ In **Settings → Automatic Switching** you can turn on:
 
 ### Adding Several Accounts
 
-Choose **Add Several Accounts…** in the menu bar panel, or from the arrow next to **Add Account…** in the window. Sign in to one account after another with **Add Another**: chats a restart cuts off wait instead of continuing, and nothing switches on its own. Press **Done** on the account they should continue in; Claude restarts once and continues them all there.
+Choose **Add Several Accounts…** in the menu bar panel, or from the arrow next to **Add Account…** in the window. Sign in to one account after another with **Add Another**: chats a restart cuts off wait instead of continuing, and nothing switches on its own. Press **Done** on the account they should continue in; Claude restarts once and continues them all there. If you forget, the mode ends on its own: when the signed-in account is nearly full it switches to the account with room and continues the waiting chats there, and 30 minutes after the last account was added it finishes once chats are idle.
 
 ### Workspaces
 

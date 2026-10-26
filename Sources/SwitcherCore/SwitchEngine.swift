@@ -74,8 +74,10 @@ public struct SwitchEngine: Sendable {
     /// Signs Claude in as `target`, keeping the current sign-in. With
     /// `mirrorSettings`, the per-account Claude Code settings of the account
     /// being left (found in `accounts`) are copied onto `target`.
-    /// With `org`, Claude opens that workspace of `target`.
-    public func switchFiles(to target: Account, org: String? = nil, accounts: [Account] = [], mirrorSettings: Bool = false) throws -> SwitchReport {
+    /// With `org`, Claude opens that workspace of `target`. The held chats
+    /// `held` (see `holdChats`) continue there too.
+    public func switchFiles(to target: Account, org: String? = nil, accounts: [Account] = [], mirrorSettings: Bool = false,
+                            held: [String] = []) throws -> SwitchReport {
         try withBackup { active in
             guard active != target.id else { return SwitchReport() }
             guard store.hasSignIn(target.id) else { throw SwitchError.noSavedSignIn }
@@ -90,7 +92,7 @@ public struct SwitchEngine: Sendable {
             if let left = accounts.first(where: { $0.id == active }) { try carryScheduledTasks(from: left, to: target) }
             var report = try importChats(into: target)
             report.settingsRestored = try AccountPrefs.restore(in: desktop, account: target.id, from: store.signInDir(target.id))
-            report.cutOff = cutOff
+            report.cutOff = try withHeld(held, cutOff, in: target)
             if mirrorSettings, let source = accounts.first(where: { $0.id == active }) {
                 report.settingsMirrored = try SettingsMirror.mirror(in: desktop, from: source, to: target)
             }
@@ -100,8 +102,8 @@ public struct SwitchEngine: Sendable {
 
     /// Opens another workspace of the signed-in account (personal or Team):
     /// Claude starts in it and signs itself in there. Chats of every account
-    /// come along, and what the quit cut off continues.
-    public func switchOrg(to org: String, accounts: [Account]) throws -> SwitchReport {
+    /// come along, and what the quit cut off continues, with the held chats `held`.
+    public func switchOrg(to org: String, accounts: [Account], held: [String] = []) throws -> SwitchReport {
         try withBackup { active in
             guard var account = accounts.first(where: { $0.id == active }) else { throw SwitchError.noSavedSignIn }
             let cutOff = try markCutOffTurns(active, accounts)
@@ -110,9 +112,17 @@ public struct SwitchEngine: Sendable {
             account.org = org
             try carryScheduledTasks(from: left, to: account)
             var report = try importChats(into: account)
-            report.cutOff = cutOff
+            report.cutOff = try withHeld(held, cutOff, in: account)
             return report
         }
+    }
+
+    /// What the quit cut off, then the held chats `held`, marked to continue
+    /// in `account` once its chats are there.
+    private func withHeld(_ held: [String], _ cutOff: [CutOffTurns.Chat], in account: Account) throws -> [CutOffTurns.Chat] {
+        guard !held.isEmpty else { return cutOff }
+        let marked = try CutOffTurns.mark(ids: held, desktop: desktop, account: account.id, org: account.org)
+        return cutOff + marked.filter { h in !cutOff.contains { $0.id == h.id } }
     }
 
     /// Keeps the current sign-in and leaves Claude on its sign-in screen.
@@ -145,8 +155,7 @@ public struct SwitchEngine: Sendable {
             guard let account = accounts.first(where: { $0.id == active }) else { throw SwitchError.noSavedSignIn }
             let cutOff = try markCutOffTurns(active, accounts)
             var report = try importChats(into: account)
-            let held = try CutOffTurns.mark(ids: ids, desktop: desktop, account: account.id, org: account.org)
-            report.cutOff = cutOff + held.filter { h in !cutOff.contains { $0.id == h.id } }
+            report.cutOff = try withHeld(ids, cutOff, in: account)
             return report
         }
     }

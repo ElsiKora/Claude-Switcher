@@ -162,6 +162,9 @@ public struct SwitcherState: Codable, Sendable, Equatable {
     public var holdChats = false
     /// Chats waiting to continue (chat ids without `local_`).
     public var heldChats: [String] = []
+    /// When adding several accounts began or the last account was added;
+    /// the mode ends on its own once this is `Policy.holdIdle` ago.
+    public var holdSince: Date?
     /// What claude.ai had billed beyond each plan by the end of each day:
     /// account id → "yyyy-MM-dd" → amount in minor units, as last read that day.
     public var extraByDay: [String: [String: Double]] = [:]
@@ -212,6 +215,7 @@ public struct SwitcherState: Codable, Sendable, Equatable {
         latestVersion = try c.decodeIfPresent(String.self, forKey: .latestVersion)
         holdChats = try c.decodeIfPresent(Bool.self, forKey: .holdChats) ?? d.holdChats
         heldChats = try c.decodeIfPresent([String].self, forKey: .heldChats) ?? d.heldChats
+        holdSince = try c.decodeIfPresent(Date.self, forKey: .holdSince) ?? (holdChats ? .now : nil)
         extraByDay = try c.decodeIfPresent([String: [String: Double]].self, forKey: .extraByDay) ?? d.extraByDay
         extraTracks = try c.decodeIfPresent([String: ExtraTrack].self, forKey: .extraTracks) ?? d.extraTracks
         history = try c.decodeIfPresent([String: UsageHistory].self, forKey: .history) ?? d.history
@@ -239,6 +243,9 @@ public enum Policy {
     static let handPause: TimeInterval = 5 * 3600
     /// Spend weekly is never urgent, so it waits for chats to be idle this long.
     static let idleFor: TimeInterval = 15 * 60
+    /// Adding several accounts ends on its own this long after the last
+    /// account was added, once chats are idle.
+    public static let holdIdle: TimeInterval = 30 * 60
 
     // Polling. The usage endpoint is rate-limited per account and Claude polls it too.
     public static let activeEvery: TimeInterval = 2 * 60
@@ -306,7 +313,9 @@ public enum Policy {
     /// The account to switch to on its own, why, and how soon.
     public static func autoTarget(_ st: SwitcherState, active: String?, context c: Context) -> (Seat, SwitchCause, Urgency)? {
         let now = c.now
-        guard c.claudeRunning, !st.holdChats, st.pausedUntil.map({ now >= $0 }) ?? true,
+        // Adding several accounts holds chats, but running out still moves on:
+        // the switch ends the mode and continues the held chats there.
+        guard c.claudeRunning, st.pausedUntil.map({ now >= $0 }) ?? true,
               let cur = st.seat(active), let usage = cur.usage,
               now.timeIntervalSince(usage.checkedAt) <= activeFresh,
               st.lastSwitch.map({ now.timeIntervalSince($0) >= cooldown }) ?? true
@@ -327,13 +336,48 @@ public enum Policy {
         // The active account keeps going while its own week is the one running out.
         let handPaused = st.handSwitch.map { now.timeIntervalSince($0) < handPause } ?? false
         let chatting = c.commandRunning || (c.lastChat.map { now.timeIntervalSince($0) < idleFor } ?? false)
-        if st.spendWeekly, !handPaused, !chatting, !spendable(cur, st, now: now),
+        if st.spendWeekly, !st.holdChats, !handPaused, !chatting, !spendable(cur, st, now: now),
            let best = st.seats.filter({ usable($0, st, cur: cur, now: now) && spendable($0, st, now: now) })
                .min(by: { ($0.usage!.weeklyReset ?? .distantFuture) < ($1.usage!.weeklyReset ?? .distantFuture) }),
            worth(best, st, c) {
             return (best, .spendWeekly, .soon)
         }
         return nil
+    }
+
+    /// Whether adding several accounts should end on its own: no account
+    /// was added for `holdIdle` and no chat is at work.
+    public static func finishAdding(_ st: SwitcherState, context c: Context) -> Bool {
+        guard st.holdChats, c.claudeRunning, let since = st.holdSince else { return false }
+        let chatting = c.commandRunning || (c.lastChat.map { c.now.timeIntervalSince($0) < idleFor } ?? false)
+        return c.now.timeIntervalSince(since) >= holdIdle && !chatting
+    }
+
+    /// The active account has reached the threshold and no account has room
+    /// to move to. `next` is the account that has room again first, and when.
+    public struct NoRoom: Sendable, Equatable {
+        public var seat: Seat
+        public var next: (seat: Seat, at: Date)?
+
+        public static func == (a: NoRoom, b: NoRoom) -> Bool {
+            a.seat.id == b.seat.id && a.next?.seat.id == b.next?.seat.id && a.next?.at == b.next?.at
+        }
+    }
+
+    public static func noRoom(_ st: SwitcherState, active: String?, now: Date) -> NoRoom? {
+        guard let cur = st.seat(active), let usage = cur.usage, usage.current(at: now).peak >= st.threshold,
+              best(st, cur: cur, now: now) == nil else { return nil }
+        let line = st.threshold - headroom
+        // When each other account, and this one, is below the line again.
+        let frees = st.seats.compactMap { seat -> (seat: Seat, at: Date)? in
+            guard seat.problem == nil, !seat.excluded, seat.runsClaudeCode, let u = seat.usage else { return nil }
+            let windows = [(u.session, u.sessionReset), (u.weekly, u.weeklyReset)].filter { $0.0 >= line }
+            guard !windows.isEmpty else { return nil }
+            let resets = windows.compactMap(\.1)
+            guard resets.count == windows.count, let at = resets.max(), at > now else { return nil }
+            return (seat, at)
+        }
+        return NoRoom(seat: cur, next: frees.min { $0.at < $1.at })
     }
 
     /// The account to move to when the active one runs out: the one whose
