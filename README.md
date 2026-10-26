@@ -88,7 +88,8 @@ It runs in the menu bar, reads each account's 5-hour and weekly limits from Anth
   - to an account whose week resets within a day, only when that week is worth clearly more than the switch costs;
   - paused for two hours with one click.
 - ✨ **Same setup everywhere**: compares each account's connectors, tool permissions, plugins and skills on claude.ai with a reference account. Copy Setup adds what is missing, and only runs when you click it.
-- ✨ **Connect connectors in place**: Connect… opens claude.ai's Connectors page inside Claude Switcher as that account, whichever account Claude is using.
+- ✨ **Workspaces**: an account in a team shows its Personal and Team workspaces, each with its own limits and its own setup; automatic switching counts every workspace, and you can leave one out.
+- ✨ **Connect in Claude**: Connect… opens the Connectors page in Claude, switching Claude to that account and workspace first when needed.
 - ✨ **Claude Code settings in sync**: session presets, folder permissions and sidebar sections follow you from one account to the next.
 - ✨ **Analytics**: tokens, replies, cache hits and API-price value:
   - filtered by account and model, for today, 7 or 30 days, this month or all time;
@@ -258,7 +259,7 @@ Turn on **Adding several accounts** in the menu bar panel or the window, then ad
 
 ### Connectors
 
-On an account's page, **Connect…** opens claude.ai's Connectors page inside Claude Switcher, signed in as that account. Sign in to each connector there with its own Connect button.
+Connectors, plugins and skills live in a workspace on claude.ai, so each workspace has its own Setup section, compared with the reference you pick (any account or workspace). **Copy Setup…** adds what is missing, then reads claude.ai again and says what is there. **Connect…** opens the Connectors page in Claude, where you sign in to each connector with its own Connect button; for a workspace Claude does not have open, it offers to switch Claude there first.
 
 ### Command Line
 
@@ -275,7 +276,6 @@ Prints every saved account with its usage, then exits.
 - The update check, which you can turn off, reads this repository's latest release from `api.github.com`. Nothing else leaves your Mac: no analytics, no telemetry.
 - Analytics is read from Claude Code's own transcripts in `~/.claude/projects` and stays local.
 - Copy Setup changes an account on claude.ai, so it only runs when you click it and confirm.
-- Connect… copies an account's claude.ai session into a private web view that keeps nothing on disk; its cookies only go to claude.ai, and a connector's own sign-in page sees none of them.
 
 ## 🛣 Roadmap
 

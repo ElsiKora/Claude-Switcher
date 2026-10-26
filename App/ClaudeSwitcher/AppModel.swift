@@ -708,30 +708,22 @@ final class AppModel {
         showMainWindow?()
     }
 
-    /// A claude.ai page open inside Claude Switcher, as one account.
-    var claudeAIPage: ClaudeAIPage?
-
-    /// Opens claude.ai's Connectors page as `account`, to sign in to connectors
-    /// there. Its setup is read again once the page is closed.
-    func connect(_ seat: Seat) {
-        claudeAIPage = ClaudeAIPage(account: seat.account, org: seat.org == nil ? nil : seat.orgID, path: "/settings/connectors")
-    }
-
-    func closeClaudeAIPage() {
-        claudeAIPage = nil
-        Task { await refreshCloudSetups(force: true) }
-    }
-
-    /// An account's claude.ai cookies, decrypted off the main thread.
-    /// With `org`, claude.ai opens in that workspace of the account.
-    func webCookies(for account: Account, org: String? = nil) async throws -> [HTTPCookie] {
-        let store = cookieStore(for: account)
-        let cookies = try await Task.detached { try ClaudeWeb.webCookies(cookieStore: store) }.value
-        guard let org else { return cookies }
-        return cookies.map { cookie in
-            guard cookie.name == "lastActiveOrg", var properties = cookie.properties else { return cookie }
-            properties[.value] = org
-            return HTTPCookie(properties: properties) ?? cookie
+    /// Connectors are signed in to in Claude, in the account and workspace it
+    /// has open: opens Claude's Connectors page there, switching Claude to
+    /// `seat` first when it has another one open. Each connector's Connect
+    /// button on that page signs it in.
+    func openConnectors(in seat: Seat) async {
+        if seat.id != activeSeatID {
+            await switchTo(seat)
+            guard seat.id == activeSeatID else { return }
+            // Claude has just started; give it a moment before asking for a page.
+            try? await Task.sleep(for: .seconds(6))
+        }
+        openInClaude("/settings/connectors")
+        // Read the setup again once there was time to connect a few.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(90))
+            await self?.refreshCloudSetups(force: true)
         }
     }
 

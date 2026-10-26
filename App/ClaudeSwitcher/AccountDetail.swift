@@ -132,6 +132,7 @@ struct SetupSection: View {
     @Environment(AppModel.self) private var model
     let seat: Seat
     @State private var confirming = false
+    @State private var switchingToConnect = false
 
     private var account: Account { seat.account }
 
@@ -183,10 +184,17 @@ struct SetupSection: View {
                 if let org = seat.org { Text("Setup in \(org.label)") } else { Text("Setup") }
             } footer: {
                 if (model.cloudSetups[seat.id]?.connectors.contains { !$0.connected } ?? false) {
-                    Text("Connect opens claude.ai\u{2019}s Connectors page here, as \(seat.displayName), whichever account Claude is using. Sign in to each connector with its Connect button.")
+                    Text(seat.id == model.activeSeatID
+                         ? String(localized: "Connect opens the Connectors page in Claude. Sign in to each connector there with its Connect button.")
+                         : String(localized: "Connectors are signed in to in Claude, in the account and workspace it has open. Connect switches Claude to \(seat.displayName) first."))
                 }
             }
             .task(id: seat.id) { await model.refreshCloudSetups() }
+            .confirmationDialog("Switch Claude to \(seat.displayName)?", isPresented: $switchingToConnect) {
+                Button("Switch and Open Connectors") { Task { await model.openConnectors(in: seat) } }
+            } message: {
+                Text("Connectors are signed in to in Claude, in the account and workspace it has open. Claude restarts in \(seat.displayName), and its Connectors page opens. Chats it cuts off continue.")
+            }
             .confirmationDialog("Set up \(seat.displayName) like \(reference.displayName)?", isPresented: $confirming) {
                 Button("Copy Setup") { Task { await model.copySetup(to: seat) } }
             } message: {
@@ -239,7 +247,9 @@ struct SetupSection: View {
                  state: missing.isEmpty && signIn.isEmpty ? nil : summary(missing: missing.count, signIn: signIn.count),
                  attention: !missing.isEmpty || !signIn.isEmpty,
                  action: signIn.isEmpty ? nil : "Connect\u{2026}", path: "/settings/connectors",
-                 perform: model.hasSignIn(account) ? { model.connect(seat) } : nil,
+                 perform: model.hasSignIn(account)
+                     ? { if seat.id == model.activeSeatID { Task { await model.openConnectors(in: seat) } } else { switchingToConnect = true } }
+                     : nil,
                  notes: [("Missing", missing.map(\.name)), ("Needs sign-in", signIn.map(\.name))])
     }
 
