@@ -22,7 +22,7 @@ struct AnalyticsView: View {
     var body: some View {
         let insights = model.insights
         let report = insights.report(range, timeline: model.timeline, filter: UsageFilter(accounts: accounts, models: models),
-                                     extra: model.state.extraTracks)
+                                     extra: tracksByAccount)
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header(insights, report)
@@ -340,11 +340,19 @@ struct AnalyticsView: View {
         }
     }
 
+    /// The extra-usage tracks of each account, over all its workspaces.
+    private var tracksByAccount: [String: ExtraTrack] {
+        Dictionary(grouping: model.state.extraTracks, by: { String($0.key.split(separator: "/").first ?? "") })
+            .compactMapValues { ExtraTrack.merged($0.map(\.value)) }
+    }
+
     /// (day, account) → currency → amount billed that day, in major units.
     private func billedByDay() -> [DayAccount: [String: Double]] {
         var out: [DayAccount: [String: Double]] = [:]
-        for (account, monthToDate) in model.state.extraByDay {
-            let currency = model.state.account(account)?.usage?.extra?.currency ?? "USD"
+        for (seat, monthToDate) in model.state.extraByDay {
+            // Kept per workspace ("<account>/<org>"); the page counts by account.
+            let account = String(seat.split(separator: "/").first ?? "")
+            let currency = model.state.seat(seat)?.usage?.extra?.currency ?? model.state.account(account)?.usage?.extra?.currency ?? "USD"
             for (day, minor) in ExtraLedger.daily(monthToDate) where minor > 0 {
                 out[DayAccount(day: day, account: account), default: [:]][currency, default: 0] += minor / 100
             }

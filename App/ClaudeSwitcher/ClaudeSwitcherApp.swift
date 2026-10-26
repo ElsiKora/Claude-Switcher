@@ -11,6 +11,9 @@ enum Entry {
         if CommandLine.arguments.contains("--probe-connectors") {
             ProbeConnectorsCommand.run()
         }
+        if CommandLine.arguments.contains("--probe-orgs") {
+            ProbeOrgsCommand.run()
+        }
         ClaudeSwitcherApp.main()
     }
 }
@@ -223,6 +226,69 @@ enum StatusCommand {
 /// `ClaudeSwitcher --probe-connectors` reads, and only reads, each account's
 /// connectors and the permissions of one connector's tools from claude.ai,
 /// to show whether claude.ai answers this app. Prints names and status codes.
+/// `ClaudeSwitcher --probe-orgs` reads, and only reads, each saved
+/// account's organizations: what claude.ai lists for its session, which
+/// organizations its saved sign-in holds tokens for (key names only, never
+/// a token), and the organization claude.ai last had active.
+enum ProbeOrgsCommand {
+    static func run() -> Never {
+        let engine = SwitchEngine()
+        let state = engine.store.loadState()
+        let active = try? engine.desktop.activeAccount()
+        let done = DispatchSemaphore(value: 0)
+        let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+        func short(_ s: String) -> String { String(s.prefix(8)) }
+        Task.detached {
+            for account in state.accounts {
+                let isActive = account.id == active
+                let dir = engine.store.signInDir(account.id)
+                let cookies = isActive ? engine.desktop.cookieFiles[0] : dir.appending(path: "Cookies")
+                let config = isActive ? engine.desktop.configURL : dir.appending(path: "config.json")
+                print("== \(account.displayName) \(short(account.id)) (\(isActive ? "active" : "saved")), saved org \(short(account.org))")
+                if let keys = try? TokenCache.keys(fromEncrypted: ClaudeDesktop.tokenCache(in: config)) {
+                    for key in keys {
+                        // acct:<account>|<client>:<org>:<audience>:<scopes>; ids shortened, scopes kept.
+                        let parts = key.split(separator: "|", maxSplits: 1)
+                        let rest = parts.count > 1 ? parts[1].split(separator: ":").map(String.init) : []
+                        print("  token for org \(rest.count > 1 ? short(rest[1]) : "?") scopes \(rest.dropFirst(3).joined(separator: ":"))")
+                    }
+                } else { print("  token cache: unreadable") }
+                print("  lastActiveOrg: \((try? ClaudeWeb.cookie("lastActiveOrg", in: cookies)).flatMap { $0 }.map(short) ?? "-")")
+                // `--roundtrip`: write each workspace into a copy of the cookie store and read it back.
+                if CommandLine.arguments.contains("--roundtrip"), let orgs = account.orgs {
+                    let copy = FileManager.default.temporaryDirectory.appending(path: "claude-switcher-roundtrip-\(UUID().uuidString)")
+                    defer { try? FileManager.default.removeItem(at: copy) }
+                    if (try? FileManager.default.copyItem(at: cookies, to: copy)) != nil {
+                        for org in orgs {
+                            do {
+                                try ClaudeWeb.setActiveOrg(org.id, in: copy)
+                                let back = try ClaudeWeb.cookie("lastActiveOrg", in: copy)
+                                print("  roundtrip \(org.label): wrote \(short(org.id)), read \(back.map(short) ?? "nil") \(back == org.id ? "OK" : "MISMATCH")")
+                            } catch { print("  roundtrip \(org.label): \(error.localizedDescription)") }
+                        }
+                    }
+                }
+                do {
+                    let web = try ClaudeWeb(cookieStore: cookies, userAgent: ua)
+                    let orgs = try await web.list("/api/organizations")
+                    for o in orgs {
+                        let safe = o.filter { ["name", "capabilities", "rate_limit_tier", "billing_type", "raven_type", "active_flags"].contains($0.key) }
+                        print("  org \((o["uuid"] as? String).map(short) ?? "?"): \(safe)")
+                        guard CommandLine.arguments.contains("--usage"), let uuid = o["uuid"] as? String else { continue }
+                        let (us, ub) = try await web.get("/api/organizations/\(uuid)/usage")
+                        let obj = (try? JSONSerialization.jsonObject(with: ub)) as? [String: Any]
+                        let windows = obj?.compactMapValues { ($0 as? [String: Any])?.filter { ["utilization", "resets_at", "is_enabled", "used_credits", "monthly_limit", "currency"].contains($0.key) } }
+                        print("    usage HTTP \(us): keys \(obj?.keys.sorted() ?? []); \(windows ?? [:])")
+                    }
+                } catch { print("  /api/organizations: \(error)") }
+            }
+            done.signal()
+        }
+        done.wait()
+        exit(0)
+    }
+}
+
 enum ProbeConnectorsCommand {
     static func run() -> Never {
         let engine = SwitchEngine()

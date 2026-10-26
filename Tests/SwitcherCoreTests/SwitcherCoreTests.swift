@@ -223,7 +223,7 @@ private func write(_ text: String, _ url: URL) throws {
             }
         }
         #expect(status == kCCSuccess)
-        #expect(try SafeStorage.aesCBCDecrypt(Data(out.prefix(moved)), key: key) == plain)
+        #expect(try SafeStorage.aesCBC(kCCDecrypt, Data(out.prefix(moved)), key: key) == plain)
     }
 }
 
@@ -239,21 +239,21 @@ private func write(_ text: String, _ url: URL) throws {
         var st = SwitcherState()
         st.autoSwitch = true
         st.accounts = [account("A", session: 97, checked: now), account("B", session: 50, checked: now), account("C", session: 20, checked: now)]
-        let target = Policy.autoTarget(st, active: "A", context: .init(claudeRunning: true, now: now))
-        #expect(target?.0.id == "C")
+        let target = Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, now: now))
+        #expect(target?.0.account.id == "C")
         #expect(target?.1 == .nearlyFull)
         #expect(target?.2 == .soon)
-        #expect(Policy.autoTarget(st, active: "A", context: .init(claudeRunning: false, now: now)) == nil)
+        #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: false, now: now)) == nil)
         // Room that resets soon goes first: B's window ends in half an hour, C's room keeps.
         st.accounts[1].usage?.session = 40
         st.accounts[1].usage?.sessionReset = now.addingTimeInterval(1800)
-        #expect(Policy.autoTarget(st, active: "A", context: .init(claudeRunning: true, now: now))?.0.id == "B")
+        #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, now: now))?.0.account.id == "B")
         // Paused: nothing moves.
         st.pausedUntil = now.addingTimeInterval(600)
-        #expect(Policy.autoTarget(st, active: "A", context: .init(claudeRunning: true, now: now)) == nil)
+        #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, now: now)) == nil)
         st.pausedUntil = nil
         st.lastSwitch = now.addingTimeInterval(-60)
-        #expect(Policy.autoTarget(st, active: "A", context: .init(claudeRunning: true, now: now)) == nil)
+        #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, now: now)) == nil)
     }
 
     @Test func spendWeeklyWaitsForIdleChats() {
@@ -262,18 +262,18 @@ private func write(_ text: String, _ url: URL) throws {
         st.spendWeekly = true
         st.accounts = [account("A", session: 10, weekly: 70, checked: now),
                        account("B", session: 0, weekly: 20, weeklyReset: now.addingTimeInterval(3600), checked: now)]
-        #expect(Policy.autoTarget(st, active: "A", context: .init(claudeRunning: true, lastChat: now.addingTimeInterval(-60), now: now)) == nil)
-        #expect(Policy.autoTarget(st, active: "A", context: .init(claudeRunning: true, lastChat: now.addingTimeInterval(-3600), commandRunning: true, now: now)) == nil)
-        #expect(Policy.autoTarget(st, active: "A", context: .init(claudeRunning: true, lastChat: now.addingTimeInterval(-3600), now: now))?.1 == .spendWeekly)
+        #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, lastChat: now.addingTimeInterval(-60), now: now)) == nil)
+        #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, lastChat: now.addingTimeInterval(-3600), commandRunning: true, now: now)) == nil)
+        #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, lastChat: now.addingTimeInterval(-3600), now: now))?.1 == .spendWeekly)
     }
 
     @Test func suggestionNeedsClearlyMoreRoom() {
         let now = Date.now
         var st = SwitcherState()
         st.accounts = [account("A", session: 60, checked: now), account("B", session: 55, checked: now)]
-        #expect(Policy.suggestion(st, active: "A", now: now) == nil)
+        #expect(Policy.suggestion(st, active: "A/o", now: now) == nil)
         st.accounts[1].usage?.session = 10
-        #expect(Policy.suggestion(st, active: "A", now: now)?.id == "B")
+        #expect(Policy.suggestion(st, active: "A/o", now: now)?.account.id == "B")
     }
 }
 

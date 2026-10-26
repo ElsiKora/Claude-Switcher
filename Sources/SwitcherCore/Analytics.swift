@@ -283,6 +283,14 @@ public struct ExtraTrack: Codable, Sendable, Equatable {
         spans.removeAll { $0.end < cutoff }
     }
 
+    /// One account's tracks over all its workspaces, for analytics by account.
+    public static func merged(_ tracks: [ExtraTrack]) -> ExtraTrack? {
+        guard var out = tracks.min(by: { $0.since < $1.since }) else { return nil }
+        out.spans = tracks.flatMap(\.spans).sorted { $0.start < $1.start }
+        out.lastCheck = tracks.map(\.lastCheck).max() ?? out.lastCheck
+        return out
+    }
+
     /// Whether usage at `date` was charged as extra usage.
     public func charged(at date: Date) -> Bool {
         spans.contains { $0.contains(date) }

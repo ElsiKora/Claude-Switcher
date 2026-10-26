@@ -99,7 +99,7 @@ final class AppModel {
             cloudSetups = Demo.cloudSetups
         } else {
             engine = SwitchEngine()
-            state = engine.store.loadState()
+            state = Self.seatKeyed(engine.store.loadState())
             // Read from Claude's config, no keychain: the window opens on the signed-in account.
             active = try? engine.desktop.activeAccount()
             activity = Self.loadActivity(engine.store)
@@ -115,16 +115,24 @@ final class AppModel {
         accounts.filter { $0.id == active } + accounts.filter { $0.id != active }
     }
 
+    /// Every account in every workspace, the active account's first.
+    var sortedSeats: [Seat] {
+        sortedAccounts.flatMap { a in state.seats.filter { $0.account.id == a.id } }
+    }
+
     var hasNotices: Bool {
         error != nil || phase != nil || autoNote != nil || availableUpdate != nil || !cutOff.isEmpty
     }
     var activeAccount: Account? { state.account(active) }
+    /// The account Claude is signed in to, in the workspace it has open.
+    var activeSeatID: String? { activeAccount.map { Seat.key($0.id, $0.org) } }
+    var activeSeat: Seat? { state.seat(activeSeatID) }
     var isBusy: Bool { phase != nil && phase != .waitingForSignIn }
-    var suggestion: Account? { Policy.suggestion(state, active: active, now: now) }
+    var suggestion: Seat? { Policy.suggestion(state, active: activeSeatID, now: now) }
 
-    /// The account with the most of its limits left, signed in or not.
-    var roomiest: Account? {
-        accounts.filter { $0.problem == nil && hasSignIn($0) && $0.usage != nil }
+    /// The account and workspace with the most of its limits left, signed in or not.
+    var roomiest: Seat? {
+        state.seats.filter { $0.problem == nil && !$0.excluded && hasSignIn($0.account) && $0.usage != nil }
             .min { ($0.usage!.current(at: now).peak) < ($1.usage!.current(at: now).peak) }
     }
 
@@ -276,72 +284,91 @@ final class AppModel {
         if current != nil { noteSignIn() }
         lastChat = ChatSync.lastChatActivity(root: desktop.sessionsRoot, projects: UsageIndex.defaultProjects)
 
-        var jobs: [(id: String, isNew: Bool)] = []
-        if let current, state.account(current) == nil, now > backoff[current, default: .distantPast] {
-            jobs.append((current, true))
+        await noteActiveOrg()
+
+        // One job per account, or per workspace for an account with several:
+        // those read every workspace's limits through claude.ai.
+        struct Job {
+            var id: String
+            var isNew: Bool
+            var org: String?
+            var key: String { org.map { Seat.key(id, $0) } ?? id }
         }
-        for a in state.accounts {
-            let every = Policy.interval(for: a, active: a.id == current, now: now)
-            let due = a.usage.map { now.timeIntervalSince($0.checkedAt) >= every - 5 } ?? true
-            if due, now > backoff[a.id, default: .distantPast], hasSignIn(a) {
-                jobs.append((a.id, false))
+        var jobs: [Job] = []
+        if let current, state.account(current) == nil, now > backoff[current, default: .distantPast] {
+            jobs.append(Job(id: current, isNew: true))
+        }
+        for a in state.accounts where hasSignIn(a) {
+            if let orgs = a.orgs, orgs.count > 1 {
+                for o in orgs {
+                    let job = Job(id: a.id, isNew: false, org: o.id)
+                    if isDue(o.usage, active: a.id == current && o.id == a.org), now > backoff[job.key, default: .distantPast] { jobs.append(job) }
+                }
+            } else if isDue(a.usage, active: a.id == current), now > backoff[a.id, default: .distantPast] {
+                jobs.append(Job(id: a.id, isNew: false))
             }
         }
 
         var added: Account?
         for job in jobs {
             do {
-                let token = try await token(for: job.id, active: current)
-                if job.isNew {
-                    let profile = try await api.profile(token: token)
-                    let account = Account(profile: profile)
-                    state.accounts.append(account)
-                    added = account
-                    profileRead[job.id] = now
-                    record(String(localized: "Added \(account.displayName)."))
-                } else if profileRead[job.id].map({ now.timeIntervalSince($0) > 30 * 60 }) ?? true {
-                    // The name Claude calls you, the email and the plan follow claude.ai.
-                    profileRead[job.id] = now
-                    let profile = try await api.profile(token: token)
-                    if let old = state.account(job.id),
-                       old.name != profile.name || old.email != profile.email || old.plan != profile.plan {
-                        state.update(job.id) { $0.name = profile.name; $0.email = profile.email; $0.plan = profile.plan }
-                        if old.name != profile.name, let renamed = state.account(job.id) {
-                            record(String(localized: "\(old.displayName) is now called \(renamed.displayName), as on claude.ai."))
-                        }
+                let usage: Usage
+                if let org = job.org, let account = state.account(job.id) {
+                    let store = cookieStore(for: account)
+                    let ua = AppInfo.webUserAgent
+                    usage = try await Task.detached { try await ClaudeWeb(cookieStore: store, userAgent: ua).usage(org: org) }.value
+                    state.update(job.id) { a in
+                        if let i = a.orgs?.firstIndex(where: { $0.id == org }) { a.orgs?[i].usage = usage; a.orgs?[i].problem = nil }
+                        if a.org == org { a.usage = usage; a.problem = nil }
                     }
+                    await refreshProfile(job.id, token: nil)
+                } else {
+                    let token = try await token(for: job.id, active: current)
+                    if job.isNew {
+                        let profile = try await api.profile(token: token)
+                        let account = Account(profile: profile)
+                        state.accounts.append(account)
+                        added = account
+                        record(String(localized: "Added \(account.displayName)."))
+                    }
+                    await refreshProfile(job.id, token: token)
+                    usage = try await api.usage(token: token)
                 }
-                let usage = try await api.usage(token: token)
-                let before = state.account(job.id)?.usage
-                state.update(job.id) { $0.usage = usage; $0.problem = nil }
-                state.history[job.id, default: UsageHistory()].add(usage)
+                guard let account = state.account(job.id) else { continue }
+                let seat = Seat.key(job.id, job.org ?? account.org)
+                let before = job.org == nil || job.org == account.org ? state.history[seat]?.readings.last : nil
+                if job.org == nil { state.update(job.id) { $0.usage = usage; $0.problem = nil } }
+                state.history[seat, default: UsageHistory()].add(usage)
                 if let extra = usage.extra, extra.enabled, let used = extra.usedCents {
                     // claude.ai reports the month so far; keeping the last amount of each day gives the days.
-                    state.extraByDay[job.id, default: [:]][ExtraLedger.dayKey(now)] = used
-                    if state.extraTracks[job.id] == nil {
-                        state.extraTracks[job.id] = ExtraTrack(at: now, amount: used)
+                    state.extraByDay[seat, default: [:]][ExtraLedger.dayKey(now)] = used
+                    if state.extraTracks[seat] == nil {
+                        state.extraTracks[seat] = ExtraTrack(at: now, amount: used)
                     } else {
-                        state.extraTracks[job.id]?.record(used, at: now)
+                        state.extraTracks[seat]?.record(used, at: now)
                     }
-                    if let alert = state.extraAlert, let account = state.account(job.id),
-                       let today = ExtraLedger.daily(state.extraByDay[job.id] ?? [:])[Calendar.current.startOfDay(for: now)],
+                    if let alert = state.extraAlert, let named = state.seat(seat),
+                       let today = ExtraLedger.daily(state.extraByDay[seat] ?? [:])[Calendar.current.startOfDay(for: now)],
                        today >= alert * 100 {
-                        notifier.extraToday(account, amount: today / 100, currency: extra.currency, day: ExtraLedger.dayKey(now))
+                        notifier.extraToday(named, amount: today / 100, currency: extra.currency, day: ExtraLedger.dayKey(now))
                     }
                 }
-                if let account = state.account(job.id) { notifier.usageChanged(account, from: before, to: usage, model: self) }
-                strikes[job.id] = nil
+                if let named = state.seat(seat) {
+                    notifier.usageChanged(named, from: before.map { Usage(session: $0.session, sessionReset: nil, weekly: $0.weekly, weeklyReset: nil, checkedAt: $0.date) },
+                                          to: usage, model: self)
+                }
+                strikes[job.key] = nil
             } catch let APIError.rateLimited(after) {
-                let n = strikes[job.id, default: 0] + 1
-                strikes[job.id] = n
+                let n = strikes[job.key, default: 0] + 1
+                strikes[job.key] = n
                 let wait = after ?? min(Policy.activeEvery * pow(2, Double(n - 1)), Policy.maxBackoff)
-                backoff[job.id] = .now.addingTimeInterval(wait)
-                log.info("usage \(job.id.prefix(8)): rate limited, next try in \(wait)s")
+                backoff[job.key] = .now.addingTimeInterval(wait)
+                log.info("usage \(job.key.prefix(8)): rate limited, next try in \(wait)s")
             } catch APIError.signedOut {
-                state.update(job.id) { $0.problem = String(localized: "Signed out. Add it again.") }
+                setProblem(job.id, org: job.org, String(localized: "Signed out. Add it again."))
             } catch {
-                state.update(job.id) { $0.problem = error.localizedDescription }
-                log.error("usage \(job.id.prefix(8)): \(error.localizedDescription)")
+                setProblem(job.id, org: job.org, error.localizedDescription)
+                log.error("usage \(job.key.prefix(8)): \(error.localizedDescription)")
             }
         }
         save()
@@ -374,7 +401,7 @@ final class AppModel {
         let live = state.spendWeekly ? ClaudeProcess.liveConversations() : LiveConversations()
         var context = Policy.Context(claudeRunning: claudeRunning, lastChat: lastChat,
                                      commandRunning: !live.runningCommands.isEmpty, now: now)
-        guard var decision = Policy.autoTarget(state, active: active, context: context) else {
+        guard var decision = Policy.autoTarget(state, active: activeSeatID, context: context) else {
             waitingSince = nil
             warnIfBillingWithoutRoom()
             return
@@ -384,7 +411,7 @@ final class AppModel {
             let ids = live.ids
             context.switchCost = await Task.detached { SwitchCost.estimate(conversations: ids, projects: UsageIndex.defaultProjects) }.value
             context.dollarsPerWeeklyPercent = await dollarsPerWeeklyPercent()
-            guard let again = Policy.autoTarget(state, active: active, context: context) else { return }
+            guard let again = Policy.autoTarget(state, active: activeSeatID, context: context) else { return }
             decision = again
         }
         if decision.2 == .soon, let last = lastChat, now.timeIntervalSince(last) < Policy.pause {
@@ -400,7 +427,7 @@ final class AppModel {
     /// API prices, from its last three hours: the API value of its usage
     /// against how far its week moved. Nil until the week has moved a percent.
     private func dollarsPerWeeklyPercent() async -> Double? {
-        guard let id = active, let readings = state.history[id]?.readings, let last = readings.last,
+        guard let id = active, let seat = activeSeatID, let readings = state.history[seat]?.readings, let last = readings.last,
               let first = readings.first(where: { now.timeIntervalSince($0.date) <= Forecast.weeklyWindow }),
               last.weekly - first.weekly >= 1 else { return nil }
         await insights.updateBuckets()
@@ -423,7 +450,19 @@ final class AppModel {
 
     /// When an account's limits run out at the pace of its last checks.
     func forecast(_ account: Account) -> Forecast? {
-        account.usage.map { Forecast(usage: $0, history: state.history[account.id], now: now) }
+        state.seat(of: account).flatMap(forecast)
+    }
+
+    func forecast(_ seat: Seat) -> Forecast? {
+        seat.usage.map { Forecast(usage: $0, history: state.history[seat.id], now: now) }
+    }
+
+    /// Leaves a workspace out of automatic switching, or takes it back in.
+    func setExcluded(_ seat: Seat, _ excluded: Bool) {
+        state.update(seat.account.id) { a in
+            if let i = a.orgs?.firstIndex(where: { $0.id == seat.orgID }) { a.orgs?[i].excluded = excluded }
+        }
+        save()
     }
 
     func pauseAutoSwitch(for duration: TimeInterval = 2 * 3600) {
@@ -455,9 +494,9 @@ final class AppModel {
             let total = UsageReport.make(insights.buckets, timeline: timeline, range: day).total
             let switches = timeline.signIns.filter { day.contains($0.date) }.count
             var billed: [String] = []
-            for account in accounts {
-                if let minor = ExtraLedger.daily(state.extraByDay[account.id] ?? [:])[yesterday], minor > 0 {
-                    billed.append("\(account.displayName) \(money(minor / 100, account.usage?.extra?.currency))")
+            for seat in state.seats {
+                if let minor = ExtraLedger.daily(state.extraByDay[seat.id] ?? [:])[yesterday], minor > 0 {
+                    billed.append("\(seat.displayName) \(money(minor / 100, seat.usage?.extra?.currency))")
                 }
             }
             notifier.morningSummary(apiValue: total.cost, replies: total.tokens.messages, switches: switches, billed: billed)
@@ -474,20 +513,104 @@ final class AppModel {
         }.value
     }
 
+    private func isDue(_ usage: Usage?, active: Bool) -> Bool {
+        let every = Policy.interval(usage: usage, active: active, now: now)
+        return usage.map { now.timeIntervalSince($0.checkedAt) >= every - 5 } ?? true
+    }
+
+    private func setProblem(_ id: String, org: String?, _ problem: String) {
+        state.update(id) { a in
+            if let org, let i = a.orgs?.firstIndex(where: { $0.id == org }) { a.orgs?[i].problem = problem } else { a.problem = problem }
+        }
+    }
+
+    /// Every half hour: the name Claude calls you, the email and the plan
+    /// (from the profile, when there is a token), and the account's
+    /// workspaces (from claude.ai).
+    private func refreshProfile(_ id: String, token: String?) async {
+        guard profileRead[id].map({ now.timeIntervalSince($0) > 30 * 60 }) ?? true, let account = state.account(id) else { return }
+        profileRead[id] = now
+        if let token, let profile = try? await api.profile(token: token),
+           account.name != profile.name || account.email != profile.email || account.plan != profile.plan {
+            state.update(id) { $0.name = profile.name; $0.email = profile.email; $0.plan = profile.plan }
+            if account.name != profile.name, let renamed = state.account(id) {
+                record(String(localized: "\(account.displayName) is now called \(renamed.displayName), as on claude.ai."))
+            }
+        }
+        let store = cookieStore(for: account)
+        let ua = AppInfo.webUserAgent
+        guard let orgs = try? await Task.detached(operation: { try await ClaudeWeb(cookieStore: store, userAgent: ua).orgs() }).value else { return }
+        state.update(id) { a in
+            guard orgs.count > 1 else { a.orgs = nil; return }
+            // Keep what is known of each workspace: its limits and whether it is left out.
+            a.orgs = orgs.map { o in
+                var merged = o
+                if let old = a.orgs?.first(where: { $0.id == o.id }) {
+                    merged.usage = old.usage
+                    merged.problem = old.problem
+                    merged.excluded = old.excluded
+                } else if o.id == a.org {
+                    merged.usage = a.usage
+                }
+                return merged
+            }
+        }
+        if (state.account(id)?.orgs?.count ?? 0) > 1, account.orgs == nil {
+            record(String(localized: "\(account.displayName) has \(orgs.count) workspaces: \(orgs.map(\.label).joined(separator: ", ")). Each one\u{2019}s limits count."))
+        }
+    }
+
+    /// The workspace Claude has open, for an account with several: claude.ai's
+    /// `lastActiveOrg` cookie in Claude's own cookie store. A switch made in
+    /// Claude itself shows up here too.
+    private func noteActiveOrg() async {
+        guard let account = activeAccount, let orgs = account.orgs, orgs.count > 1 else { return }
+        let store = engine.desktop.cookieFiles[0]
+        guard let org = try? await Task.detached(operation: { try ClaudeWeb.cookie("lastActiveOrg", in: store) }).value,
+              org != account.org, orgs.contains(where: { $0.id == org }) else { return }
+        state.update(account.id) { a in
+            a.org = org
+            a.usage = a.orgs?.first { $0.id == org }?.usage
+        }
+        save()
+    }
+
     // MARK: - Actions
 
+    /// Switches to an account in the workspace it last had open.
     func switchTo(_ target: Account, cause: SwitchCause = .byHand) async {
-        let from = active
+        guard let seat = state.seat(of: target) else { return }
+        await switchTo(seat, cause: cause)
+    }
+
+    /// Switches Claude to an account, or to another workspace of the signed-in
+    /// account (which only changes the workspace claude.ai has open).
+    func switchTo(_ target: Seat, cause: SwitchCause = .byHand) async {
+        let from = activeSeatID
+        guard target.id != from else { return }
         let accounts = state.accounts
         let mirror = state.mirrorSettings
-        let ok = await restart(.switching(to: target.displayName)) { engine in
-            try engine.switchFiles(to: target, accounts: accounts, mirrorSettings: mirror)
-        } done: { [weak self] report in
-            self?.record(Self.describe(switchTo: target, cause: cause, report: report))
+        let name = target.displayName
+        let done: (SwitchReport) -> Void = { [weak self] report in
+            self?.record(Self.describe(switchTo: name, cause: cause, report: report))
             self?.cutOff = report.cutOff
             self?.continueRest(report.cutOff)
         }
+        let ok: Bool
+        if target.account.id == active {
+            let org = target.orgID
+            ok = await restart(.switching(to: name)) { engine in try engine.switchOrg(to: org, accounts: accounts) } done: { done($0) }
+        } else {
+            let org = target.org == nil ? nil : target.orgID
+            ok = await restart(.switching(to: name)) { engine in
+                try engine.switchFiles(to: target.account, org: org, accounts: accounts, mirrorSettings: mirror)
+            } done: { done($0) }
+        }
         guard ok else { return }
+        state.update(target.account.id) { a in
+            a.org = target.orgID
+            if let org = a.orgs?.first(where: { $0.id == target.orgID }) { a.usage = org.usage }
+        }
         state.lastSwitch = .now
         state.lastCause = cause
         state.lastFrom = from
@@ -502,7 +625,7 @@ final class AppModel {
         case .nearlyFull:
             break
         }
-        active = target.id
+        active = target.account.id
         save()
     }
 
@@ -847,6 +970,20 @@ final class AppModel {
         }
     }
 
+    /// History, extra usage and the spending mark are kept per account and
+    /// workspace ("<account>/<org>"); state from before workspaces had them
+    /// per account.
+    private static func seatKeyed(_ state: SwitcherState) -> SwitcherState {
+        var s = state
+        func key(_ k: String) -> String { k.contains("/") ? k : s.account(k).map { Seat.key($0.id, $0.org) } ?? k }
+        s.history = Dictionary(s.history.map { (key($0.key), $0.value) }, uniquingKeysWith: { a, _ in a })
+        s.extraTracks = Dictionary(s.extraTracks.map { (key($0.key), $0.value) }, uniquingKeysWith: { a, _ in a })
+        s.extraByDay = Dictionary(s.extraByDay.map { (key($0.key), $0.value) }, uniquingKeysWith: { a, _ in a })
+        s.spending = s.spending.map(key)
+        s.lastFrom = s.lastFrom.map(key)
+        return s
+    }
+
     private static func loadActivity(_ store: Store) -> [Activity] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -860,11 +997,11 @@ final class AppModel {
         add(Activity(date: .now, text: text, isError: true))
     }
 
-    private static func describe(switchTo target: Account, cause: SwitchCause, report: SwitchReport) -> String {
+    private static func describe(switchTo name: String, cause: SwitchCause, report: SwitchReport) -> String {
         let base = switch cause {
-        case .byHand: String(localized: "Switched to \(target.displayName).")
-        case .nearlyFull: String(localized: "Switched to \(target.displayName) on its own: the active account was nearly full.")
-        case .spendWeekly: String(localized: "Switched to \(target.displayName) on its own to use its week before it resets.")
+        case .byHand: String(localized: "Switched to \(name).")
+        case .nearlyFull: String(localized: "Switched to \(name) on its own: the active account was nearly full.")
+        case .spendWeekly: String(localized: "Switched to \(name) on its own to use its week before it resets.")
         }
         var text = base + " " + String(localized: "\(report.chats) chats and \(report.projects) projects brought along.")
         if report.settingsMirrored { text += " " + String(localized: "Claude Code settings copied over.") }

@@ -18,6 +18,10 @@ struct AccountDetail: View {
             }
             Notices()
 
+            if (account.orgs?.count ?? 0) > 1 {
+                WorkspacesSection(account: account)
+            }
+
             Section {
                 let forecast = model.forecast(account)
                 limitRow("5-hour limit", icon: "clock.fill", color: .blue, percent: usage?.session, reset: usage?.sessionReset,
@@ -27,7 +31,11 @@ struct AccountDetail: View {
                          runsOut: forecast?.weekly,
                          colors: LimitStyle.week(usage?.weekly ?? 0, threshold: model.state.threshold))
             } header: {
-                Text("Usage")
+                if let org = account.orgs?.first(where: { $0.id == account.org }), (account.orgs?.count ?? 0) > 1 {
+                    Text("Usage in \(org.label)")
+                } else {
+                    Text("Usage")
+                }
             } footer: {
                 if let checked = account.usage?.checkedAt {
                     Text("Checked \(checked.formatted(.relative(presentation: .named))).")
@@ -305,5 +313,56 @@ struct SwitchButton: View {
         Button(title) { Task { await model.switchTo(account) } }
         .disabled(model.isBusy || !model.hasSignIn(account))
         .help(model.hasSignIn(account) ? "Restarts Claude signed in as \(account.displayName)" : "Add the account again to sign in once more")
+    }
+}
+
+/// The workspaces of an account that has several (its own plan and its
+/// teams): each one's limits, the switch between them, and whether
+/// automatic switching may use it.
+struct WorkspacesSection: View {
+    @Environment(AppModel.self) private var model
+    let account: Account
+
+    var body: some View {
+        Section {
+            ForEach(model.state.seats.filter { $0.account.id == account.id }) { seat in
+                if let org = seat.org {
+                    row(seat, org)
+                    Toggle(isOn: Binding(get: { !seat.excluded }, set: { model.setExcluded(seat, !$0) })) {
+                        Text("Use for automatic switching")
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.leading, 34)
+                }
+            }
+        } header: {
+            Text("Workspaces")
+        } footer: {
+            Text("Each workspace has limits of its own, and the switcher counts all of them. Switching between workspaces keeps the account signed in: Claude restarts in the other one. A workspace left out of automatic switching still shows here and in the menu bar, and you can switch to it by hand.")
+        }
+    }
+
+    private func row(_ seat: Seat, _ org: Org) -> some View {
+        let u = seat.usage?.current(at: model.now)
+        let isOpen = seat.orgID == account.org
+        let signedIn = account.id == model.active
+        return LabeledContent {
+            HStack(spacing: 10) {
+                AccountRings(account: seat.inWorkspace, size: 28)
+                if isOpen, signedIn {
+                    Text("Open in Claude").foregroundStyle(.secondary)
+                } else {
+                    Button(signedIn ? "Switch" : "Switch to This") { Task { await model.switchTo(seat) } }
+                        .disabled(model.isBusy || !model.hasSignIn(account))
+                }
+            }
+        } label: {
+            Label {
+                Text(org.kind == .personal ? String(localized: "Personal") : org.name)
+                Text(seat.problem ?? String(localized: "5-hour \(percentText(u?.session)) · Week \(percentText(u?.weekly))\(org.kind == .personal ? "" : " · " + String(localized: "Team"))"))
+            } icon: {
+                SettingsIcon(systemName: org.kind == .personal ? "person.fill" : "person.3.fill", color: org.kind == .personal ? .blue : .indigo)
+            }
+        }
     }
 }

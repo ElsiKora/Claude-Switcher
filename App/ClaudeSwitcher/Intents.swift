@@ -67,7 +67,7 @@ struct SwitchToBestAccountIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let model = AppModel.shared
-        guard let best = model.roomiest, best.id != model.active else {
+        guard let best = model.roomiest, best.id != model.activeSeatID else {
             return .result(dialog: "The account Claude is signed in to already has the most room.")
         }
         await model.switchTo(best)

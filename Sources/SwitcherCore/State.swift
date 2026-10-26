@@ -10,6 +10,10 @@ public struct Account: Codable, Sendable, Identifiable, Equatable {
     public var usage: Usage?
     /// Why usage cannot be read, e.g. the saved sign-in has expired.
     public var problem: String?
+    /// The workspaces of an account that has more than one with Claude
+    /// (personal and Team); nil for an account with one. `org` and `usage`
+    /// are the one Claude has open.
+    public var orgs: [Org]?
 
     public init(profile: Profile) {
         id = profile.accountID
@@ -20,6 +24,97 @@ public struct Account: Codable, Sendable, Identifiable, Equatable {
     }
 
     public var displayName: String { name.isEmpty ? email : name }
+}
+
+/// A workspace of an account on claude.ai, with limits of its own.
+public struct Org: Codable, Sendable, Equatable, Identifiable {
+    public enum Kind: String, Codable, Sendable {
+        case personal, team, enterprise
+    }
+
+    public var id: String
+    public var name: String
+    public var kind: Kind
+    public var usage: Usage?
+    public var problem: String?
+    /// Shown and switchable by hand, but left out of automatic switching.
+    public var excluded = false
+
+    public init(id: String, name: String, kind: Kind) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        kind = try c.decode(Kind.self, forKey: .kind)
+        usage = try c.decodeIfPresent(Usage.self, forKey: .usage)
+        problem = try c.decodeIfPresent(String.self, forKey: .problem)
+        excluded = try c.decodeIfPresent(Bool.self, forKey: .excluded) ?? false
+    }
+}
+
+/// One set of limits Claude can be signed in to: an account in one of its
+/// workspaces. What the switcher measures and switches between.
+public struct Seat: Identifiable, Sendable, Equatable {
+    public var account: Account
+    public var orgID: String
+    /// Set when the account has several workspaces: which one this is.
+    public var org: Org?
+    public var usage: Usage?
+    public var problem: String?
+    public var excluded: Bool
+
+    /// "<account>/<org>": limits belong to an account in a workspace.
+    public var id: String { Self.key(account.id, orgID) }
+
+    public static func key(_ account: String, _ org: String) -> String { "\(account)/\(org)" }
+
+    /// The account as it is in this workspace: its limits there.
+    public var inWorkspace: Account {
+        var a = account
+        a.org = orgID
+        a.usage = usage
+        a.problem = problem
+        return a
+    }
+
+    /// "Alex · Team" for a workspace of a several-workspace account.
+    public var displayName: String {
+        guard let org else { return account.displayName }
+        return "\(account.displayName) · \(org.label)"
+    }
+}
+
+extension Org {
+    /// "Personal" for one's own plan, the workspace's name for a team.
+    public var label: String {
+        kind == .personal ? String(localized: "Personal") : name
+    }
+}
+
+extension SwitcherState {
+    /// Every account in every workspace, in account order.
+    public var seats: [Seat] {
+        accounts.flatMap { a -> [Seat] in
+            guard let orgs = a.orgs, orgs.count > 1 else {
+                return [Seat(account: a, orgID: a.org, org: nil, usage: a.usage, problem: a.problem, excluded: false)]
+            }
+            return orgs.map { Seat(account: a, orgID: $0.id, org: $0, usage: $0.usage, problem: $0.problem ?? a.problem, excluded: $0.excluded) }
+        }
+    }
+
+    public func seat(_ id: String?) -> Seat? {
+        seats.first { $0.id == id }
+    }
+
+    /// The seat an account has open now.
+    public func seat(of account: Account) -> Seat? {
+        seat(Seat.key(account.id, account.org))
+    }
 }
 
 public enum SwitchCause: String, Codable, Sendable {
@@ -149,8 +244,13 @@ public enum Policy {
 
     /// How often an account's usage is read.
     public static func interval(for account: Account, active: Bool, now: Date) -> TimeInterval {
+        interval(usage: account.usage, active: active, now: now)
+    }
+
+    /// How often limits are read: often for the one in use, more often near full.
+    public static func interval(usage: Usage?, active: Bool, now: Date) -> TimeInterval {
         guard active else { return idleEvery }
-        return (account.usage?.current(at: now).peak ?? 0) >= hotAt ? hotEvery : activeEvery
+        return (usage?.current(at: now).peak ?? 0) >= hotAt ? hotEvery : activeEvery
     }
 
     /// What the switcher knows besides the state when it decides.
@@ -197,10 +297,10 @@ public enum Policy {
     static let worthIt: Double = 3
 
     /// The account to switch to on its own, why, and how soon.
-    public static func autoTarget(_ st: SwitcherState, active: String?, context c: Context) -> (Account, SwitchCause, Urgency)? {
+    public static func autoTarget(_ st: SwitcherState, active: String?, context c: Context) -> (Seat, SwitchCause, Urgency)? {
         let now = c.now
         guard c.claudeRunning, !st.holdChats, st.pausedUntil.map({ now >= $0 }) ?? true,
-              let cur = st.account(active), let usage = cur.usage,
+              let cur = st.seat(active), let usage = cur.usage,
               now.timeIntervalSince(usage.checkedAt) <= activeFresh,
               st.lastSwitch.map({ now.timeIntervalSince($0) >= cooldown }) ?? true
         else { return nil }
@@ -221,7 +321,7 @@ public enum Policy {
         let handPaused = st.handSwitch.map { now.timeIntervalSince($0) < handPause } ?? false
         let chatting = c.commandRunning || (c.lastChat.map { now.timeIntervalSince($0) < idleFor } ?? false)
         if st.spendWeekly, !handPaused, !chatting, !spendable(cur, st, now: now),
-           let best = st.accounts.filter({ usable($0, st, cur: cur, now: now) && spendable($0, st, now: now) })
+           let best = st.seats.filter({ usable($0, st, cur: cur, now: now) && spendable($0, st, now: now) })
                .min(by: { ($0.usage!.weeklyReset ?? .distantFuture) < ($1.usage!.weeklyReset ?? .distantFuture) }),
            worth(best, st, c) {
             return (best, .spendWeekly, .soon)
@@ -233,9 +333,9 @@ public enum Policy {
     /// free room would be lost first (a 5-hour window or a week about to
     /// reset), else the one with the most room. Room that would be lost is
     /// worth using before room that keeps.
-    static func best(_ st: SwitcherState, cur: Account, now: Date) -> Account? {
-        let candidates = st.accounts.filter { usable($0, st, cur: cur, now: now) }
-        func expires(_ a: Account) -> Date? {
+    static func best(_ st: SwitcherState, cur: Seat, now: Date) -> Seat? {
+        let candidates = st.seats.filter { usable($0, st, cur: cur, now: now) }
+        func expires(_ a: Seat) -> Date? {
             let u = a.usage!.current(at: now)
             let windows: [(Double, Date?)] = [(100 - u.session, u.sessionReset), (100 - u.weekly, u.weeklyReset)]
             return windows.compactMap { room, reset in room >= minRoom ? reset : nil }.min()
@@ -256,7 +356,7 @@ public enum Policy {
     /// Whether moving to `target` for its expiring week gains clearly more
     /// than the switch costs: the week it has left against re-reading every
     /// open chat. Without the figures to tell, it moves, as it always has.
-    static func worth(_ target: Account, _ st: SwitcherState, _ c: Context) -> Bool {
+    static func worth(_ target: Seat, _ st: SwitcherState, _ c: Context) -> Bool {
         guard let cost = c.switchCost, let perPercent = c.dollarsPerWeeklyPercent, perPercent > 0,
               let u = target.usage?.current(at: c.now) else { return true }
         let gain = (100 - u.weekly) * perPercent
@@ -264,10 +364,10 @@ public enum Policy {
     }
 
     /// The account with the most room left, when it has clearly more than the active one.
-    public static func suggestion(_ st: SwitcherState, active: String?, now: Date) -> Account? {
-        let curPeak = st.account(active)?.usage?.current(at: now).peak ?? 0
-        let candidates = st.accounts.filter { a in
-            a.id != active && a.problem == nil && a.usage.map { now.timeIntervalSince($0.checkedAt) <= idleFresh } == true
+    public static func suggestion(_ st: SwitcherState, active: String?, now: Date) -> Seat? {
+        let curPeak = st.seat(active)?.usage?.current(at: now).peak ?? 0
+        let candidates = st.seats.filter { a in
+            a.id != active && a.problem == nil && !a.excluded && a.usage.map { now.timeIntervalSince($0.checkedAt) <= idleFresh } == true
         }
         guard let best = candidates.min(by: { $0.usage!.current(at: now).peak < $1.usage!.current(at: now).peak }),
               best.usage!.current(at: now).peak <= curPeak - headroom
@@ -275,8 +375,8 @@ public enum Policy {
         return best
     }
 
-    static func usable(_ a: Account, _ st: SwitcherState, cur: Account, now: Date) -> Bool {
-        guard a.id != cur.id, a.problem == nil, let u = a.usage, now.timeIntervalSince(u.checkedAt) <= idleFresh else {
+    static func usable(_ a: Seat, _ st: SwitcherState, cur: Seat, now: Date) -> Bool {
+        guard a.id != cur.id, a.problem == nil, !a.excluded, let u = a.usage, now.timeIntervalSince(u.checkedAt) <= idleFresh else {
             return false
         }
         // Below the threshold with room to spare, so never one that is
@@ -284,7 +384,7 @@ public enum Policy {
         return u.current(at: now).peak < st.threshold - headroom
     }
 
-    static func spendable(_ a: Account, _ st: SwitcherState, now: Date) -> Bool {
+    static func spendable(_ a: Seat, _ st: SwitcherState, now: Date) -> Bool {
         if a.id == st.spending, let until = st.spendUntil, now < until { return true }
         guard let u = a.usage?.current(at: now), let reset = u.weeklyReset else { return false }
         let left = reset.timeIntervalSince(now)

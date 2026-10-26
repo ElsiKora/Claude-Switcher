@@ -25,7 +25,7 @@ struct MenuPanel: View {
                     .padding(.bottom, 8)
             }
 
-            let others = model.sortedAccounts.filter { $0.id != model.active }
+            let others = model.sortedSeats.filter { $0.id != model.activeSeatID }
             if model.accounts.isEmpty {
                 Text("Sign in to Claude as usual. The account shows up here within a minute.")
                     .font(.system(size: 12))
@@ -35,8 +35,8 @@ struct MenuPanel: View {
             } else if !others.isEmpty {
                 SectionTitle("Switch To")
                 VStack(spacing: 0) {
-                    ForEach(others) { account in
-                        PanelAccountRow(account: account)
+                    ForEach(others) { seat in
+                        PanelAccountRow(seat: seat)
                     }
                 }
                 .padding(.horizontal, 5)
@@ -87,7 +87,9 @@ struct ActiveAccountCard: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(account.displayName).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                    if !account.plan.isEmpty {
+                    if let org = model.activeSeat?.org {
+                        WorkspaceBadge(org: org)
+                    } else if !account.plan.isEmpty {
                         Text(account.plan)
                             .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 6)
@@ -166,25 +168,32 @@ struct MenuRow: View {
 
 struct PanelAccountRow: View {
     @Environment(AppModel.self) private var model
-    let account: Account
+    let seat: Seat
     @State private var hovering = false
 
-    private var usage: Usage? { account.usage?.current(at: model.now) }
-    private var canSwitch: Bool { !model.isBusy && model.hasSignIn(account) }
-    private var isBest: Bool { model.suggestion?.id == account.id }
+    private var account: Account { seat.inWorkspace }
+    private var usage: Usage? { seat.usage?.current(at: model.now) }
+    private var canSwitch: Bool { !model.isBusy && model.hasSignIn(seat.account) }
+    private var isBest: Bool { model.suggestion?.id == seat.id }
 
     var body: some View {
         Button {
             guard canSwitch else { return }
-            Task { await model.switchTo(account) }
+            Task { await model.switchTo(seat) }
         } label: {
             HStack(spacing: 10) {
                 AccountRings(account: account, size: 34)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 5) {
                         Text(account.displayName).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                        if !account.plan.isEmpty {
+                        if let org = seat.org {
+                            WorkspaceBadge(org: org)
+                        } else if !account.plan.isEmpty {
                             Text(account.plan).font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                        if seat.excluded {
+                            Image(systemName: "hand.raised.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+                                .help("Left out of automatic switching")
                         }
                     }
                     Text(subtitle)
@@ -215,12 +224,12 @@ struct PanelAccountRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(canSwitch ? "Switch Claude to \(account.displayName)" : "")
+        .help(canSwitch ? "Switch Claude to \(seat.displayName)" : "")
     }
 
     private var subtitle: String {
-        if let problem = account.problem { return problem }
-        if !model.hasSignIn(account) { return String(localized: "Add it again to sign in") }
+        if let problem = seat.problem { return problem }
+        if !model.hasSignIn(seat.account) { return String(localized: "Add it again to sign in") }
         return String(localized: "5-hour \(percentText(usage?.session)) · Week \(percentText(usage?.weekly))")
     }
 }
@@ -446,5 +455,20 @@ struct Notices: View {
                     .padding(.horizontal, -14)
             }
         }
+    }
+}
+
+/// Which workspace of an account a seat is: "Personal" or the team's name.
+struct WorkspaceBadge: View {
+    let org: Org
+
+    var body: some View {
+        Label(org.label, systemImage: org.kind == .personal ? "person.fill" : "person.3.fill")
+            .labelStyle(.titleAndIcon)
+            .font(.system(size: 10, weight: .semibold))
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.quaternary, in: .capsule)
     }
 }

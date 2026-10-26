@@ -23,9 +23,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Compares an account's usage before and after a check.
-    func usageChanged(_ account: Account, from old: Usage?, to new: Usage, model: AppModel) {
+    func usageChanged(_ account: Seat, from old: Usage?, to new: Usage, model: AppModel) {
         guard model.state.notify, let old else { return }
-        let isActive = account.id == model.active
+        let isActive = account.id == model.activeSeatID
         if old.weekly >= 50, new.weekly + 30 <= old.weekly {
             post("week-\(account.id)-\(Int(new.checkedAt.timeIntervalSince1970 / 3600))",
                  title: String(localized: "\(account.displayName)\u{2019}s week has reset"),
@@ -48,7 +48,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Extra usage billed today passed the amount set in Settings.
-    func extraToday(_ account: Account, amount: Double, currency: String?, day: String) {
+    func extraToday(_ account: Seat, amount: Double, currency: String?, day: String) {
         guard AppModel.shared.state.notify else { return }
         post("extra-\(account.id)-\(day)",
              title: String(localized: "\(account.displayName): \(money(amount, currency)) of extra usage today"),
@@ -75,24 +75,24 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         post("summary-\(Int(Date.now.timeIntervalSince1970 / 86_400))", title: String(localized: "Yesterday in Claude Code"), body: body, switchTo: nil)
     }
 
-    private func post(_ id: String, title: String, body: String, switchTo account: Account?) {
+    private func post(_ id: String, title: String, body: String, switchTo account: Seat?) {
         guard told.insert(id).inserted else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         if let account {
             content.categoryIdentifier = Self.category
-            content.userInfo = ["account": account.id]
+            content.userInfo = ["seat": account.id]
         }
         center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let id = response.notification.request.content.userInfo["account"] as? String else { return }
+        guard let id = response.notification.request.content.userInfo["seat"] as? String else { return }
         let tapped = response.actionIdentifier
         await MainActor.run {
             let model = AppModel.shared
-            guard let account = model.state.account(id) else { return }
+            guard let account = model.state.seat(id) else { return }
             if tapped == Self.switchAction {
                 Task { await model.switchTo(account) }
             } else {

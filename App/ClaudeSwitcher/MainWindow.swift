@@ -114,13 +114,20 @@ struct AccountRow: View {
     @Environment(AppModel.self) private var model
     let account: Account
 
+    /// "Active", or its limits; with the workspace open for an account that has several.
+    private var rowSubtitle: String {
+        let state = account.id == model.active ? String(localized: "Active") : usageSummary(account, now: model.now)
+        guard let org = account.orgs?.first(where: { $0.id == account.org }), (account.orgs?.count ?? 0) > 1 else { return state }
+        return "\(state) · \(org.label)"
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             AccountRings(account: account, size: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text(account.displayName)
                     .lineLimit(1)
-                Text(account.id == model.active ? String(localized: "Active") : usageSummary(account, now: model.now))
+                Text(rowSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

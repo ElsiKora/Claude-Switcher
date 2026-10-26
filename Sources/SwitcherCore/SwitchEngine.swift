@@ -73,19 +73,40 @@ public struct SwitchEngine: Sendable {
     /// Signs Claude in as `target`, keeping the current sign-in. With
     /// `mirrorSettings`, the per-account Claude Code settings of the account
     /// being left (found in `accounts`) are copied onto `target`.
-    public func switchFiles(to target: Account, accounts: [Account] = [], mirrorSettings: Bool = false) throws -> SwitchReport {
+    /// With `org`, Claude opens that workspace of `target`.
+    public func switchFiles(to target: Account, org: String? = nil, accounts: [Account] = [], mirrorSettings: Bool = false) throws -> SwitchReport {
         try withBackup { active in
             guard active != target.id else { return SwitchReport() }
             guard store.hasSignIn(target.id) else { throw SwitchError.noSavedSignIn }
             let cutOff = try markCutOffTurns(active, accounts)
             if let active { try save(active) }
             try desktop.restoreSignIn(from: store.signInDir(target.id))
+            var target = target
+            if let org, org != target.org {
+                try ClaudeWeb.setActiveOrg(org, in: desktop.cookieFiles[0])
+                target.org = org
+            }
             var report = try importChats(into: target)
             report.settingsRestored = try AccountPrefs.restore(in: desktop, account: target.id, from: store.signInDir(target.id))
             report.cutOff = cutOff
             if mirrorSettings, let source = accounts.first(where: { $0.id == active }) {
                 report.settingsMirrored = try SettingsMirror.mirror(in: desktop, from: source, to: target)
             }
+            return report
+        }
+    }
+
+    /// Opens another workspace of the signed-in account (personal or Team):
+    /// Claude starts in it and signs itself in there. Chats of every account
+    /// come along, and what the quit cut off continues.
+    public func switchOrg(to org: String, accounts: [Account]) throws -> SwitchReport {
+        try withBackup { active in
+            guard var account = accounts.first(where: { $0.id == active }) else { throw SwitchError.noSavedSignIn }
+            let cutOff = try markCutOffTurns(active, accounts)
+            try ClaudeWeb.setActiveOrg(org, in: desktop.cookieFiles[0])
+            account.org = org
+            var report = try importChats(into: account)
+            report.cutOff = cutOff
             return report
         }
     }

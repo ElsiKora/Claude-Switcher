@@ -139,14 +139,17 @@ public struct AnthropicAPI: Sendable {
             var extra_usage: Extra?
         }
         let body: Body = try await get("/api/oauth/usage", token: token)
-        var usage = Usage(
-            session: body.five_hour?.utilization ?? 0,
-            sessionReset: Self.date(body.five_hour?.resets_at),
-            weekly: body.seven_day?.utilization ?? 0,
-            weeklyReset: Self.date(body.seven_day?.resets_at),
-            checkedAt: .now)
-        if let e = body.extra_usage {
-            usage.extra = ExtraUsage(enabled: e.is_enabled ?? false, usedCents: e.used_credits, limitCents: e.monthly_limit, currency: e.currency)
+        return Self.usage(body.five_hour?.utilization, body.five_hour?.resets_at, body.seven_day?.utilization, body.seven_day?.resets_at,
+                          extra: body.extra_usage.map { ($0.is_enabled, $0.used_credits, $0.monthly_limit, $0.currency) })
+    }
+
+    /// Usage as `/api/oauth/usage` and claude.ai's own usage page report it.
+    static func usage(_ session: Double?, _ sessionReset: String?, _ weekly: Double?, _ weeklyReset: String?,
+                      extra: (Bool?, Double?, Double?, String?)?) -> Usage {
+        var usage = Usage(session: session ?? 0, sessionReset: date(sessionReset), weekly: weekly ?? 0,
+                          weeklyReset: date(weeklyReset), checkedAt: .now)
+        if let (enabled, used, limit, currency) = extra {
+            usage.extra = ExtraUsage(enabled: enabled ?? false, usedCents: used, limitCents: limit, currency: currency)
         }
         return usage
     }
@@ -185,6 +188,13 @@ public enum TokenCache {
     public static func accessToken(fromEncrypted value: String, account: String, storage: SafeStorage = .shared, now: Date = .now) throws -> String {
         guard let data = Data(base64Encoded: value) else { throw SafeStorageError.unexpectedFormat }
         return try accessToken(fromPlain: storage.decrypt(data), account: account, now: now)
+    }
+
+    /// The cache's keys, without the tokens: which account and organization each token is for.
+    public static func keys(fromEncrypted value: String, storage: SafeStorage = .shared) throws -> [String] {
+        guard let data = Data(base64Encoded: value) else { throw SafeStorageError.unexpectedFormat }
+        let object = try JSONSerialization.jsonObject(with: storage.decrypt(data)) as? [String: Any] ?? [:]
+        return object.keys.sorted()
     }
 
     static func accessToken(fromPlain plain: Data, account: String, now: Date) throws -> String {

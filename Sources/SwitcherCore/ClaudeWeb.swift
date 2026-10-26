@@ -1,4 +1,5 @@
 public import Foundation
+import CryptoKit
 import SQLite3
 
 /// Talks to claude.ai with an account's own web session, the way claude.ai's
@@ -85,6 +86,76 @@ public struct ClaudeWeb: Sendable {
         var expires: Int64 = 0
     }
 
+    // MARK: - Workspaces
+
+    /// The account's workspaces with Claude (chat), from claude.ai: its own
+    /// plan and the teams it belongs to. API-only organizations are left out.
+    public func orgs() async throws -> [Org] {
+        try await list("/api/organizations").compactMap { o in
+            guard let id = o["uuid"] as? String, (o["capabilities"] as? [String])?.contains("chat") == true else { return nil }
+            let raven = o["raven_type"] as? String
+            let kind: Org.Kind = raven == "enterprise" ? .enterprise : raven == nil ? .personal : .team
+            return Org(id: id, name: o["name"] as? String ?? "", kind: kind)
+        }
+    }
+
+    /// A workspace's limits, as claude.ai's usage page reads them.
+    public func usage(org: String) async throws -> Usage {
+        let body = try await object("/api/organizations/\(org)/usage")
+        func window(_ key: String) -> (Double?, String?) {
+            let w = body[key] as? [String: Any]
+            return ((w?["utilization"] as? NSNumber)?.doubleValue, w?["resets_at"] as? String)
+        }
+        let (session, sessionReset) = window("five_hour")
+        let (weekly, weeklyReset) = window("seven_day")
+        let e = body["extra_usage"] as? [String: Any]
+        return AnthropicAPI.usage(session, sessionReset, weekly, weeklyReset, extra: e.map {
+            (($0["is_enabled"] as? NSNumber)?.boolValue, ($0["used_credits"] as? NSNumber)?.doubleValue,
+             ($0["monthly_limit"] as? NSNumber)?.doubleValue, $0["currency"] as? String)
+        })
+    }
+
+    /// Sets the workspace claude.ai and Claude open: the `lastActiveOrg`
+    /// cookie, which Claude reads when it starts and mints its sign-in for.
+    /// Claude must be closed. The cookie has to exist: Claude writes it the
+    /// first time the account opens a workspace.
+    public static func setActiveOrg(_ org: String, in store: URL, storage: SafeStorage = .shared) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(store.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { throw SafeStorageError.unexpectedFormat }
+        defer { sqlite3_close(db) }
+        var version = 0
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT value FROM meta WHERE key = 'version'", -1, &stmt, nil) == SQLITE_OK,
+           sqlite3_step(stmt) == SQLITE_ROW, let text = sqlite3_column_text(stmt, 0) {
+            version = Int(String(cString: text)) ?? 0
+        }
+        sqlite3_finalize(stmt)
+        let sql = "SELECT host_key FROM cookies WHERE name = 'lastActiveOrg' AND (host_key = '.claude.ai' OR host_key = 'claude.ai')"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, sqlite3_step(stmt) == SQLITE_ROW,
+              let hostText = sqlite3_column_text(stmt, 0) else {
+            sqlite3_finalize(stmt)
+            throw ClaudeWebError.noActiveOrgCookie
+        }
+        let host = String(cString: hostText)
+        sqlite3_finalize(stmt)
+        // From version 24 on, the plaintext starts with a SHA-256 of the cookie's host.
+        var plain = Data(org.utf8)
+        if version >= 24 { plain = Data(SHA256.hash(data: Data(host.utf8))) + plain }
+        let encrypted = try storage.encrypt(plain)
+        let update = "UPDATE cookies SET encrypted_value = ?, value = '' WHERE name = 'lastActiveOrg' AND host_key = ?"
+        guard sqlite3_prepare_v2(db, update, -1, &stmt, nil) == SQLITE_OK else { throw SafeStorageError.unexpectedFormat }
+        defer { sqlite3_finalize(stmt) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        _ = encrypted.withUnsafeBytes { sqlite3_bind_blob(stmt, 1, $0.baseAddress, Int32($0.count), transient) }
+        sqlite3_bind_text(stmt, 2, host, -1, transient)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw SafeStorageError.unexpectedFormat }
+    }
+
+    /// One claude.ai cookie's value, decrypted.
+    public static func cookie(_ name: String, in store: URL, storage: SafeStorage = .shared) throws -> String? {
+        try cookies(in: store, storage: storage).first { $0.name == name }?.value
+    }
+
     /// The claude.ai cookies of a cookie store as `HTTPCookie`s, for a web
     /// view that opens claude.ai as that account. They are scoped to
     /// claude.ai, so pages of other sites never see them.
@@ -144,5 +215,13 @@ public struct ClaudeWeb: Sendable {
                 expires: sqlite3_column_int64(stmt, 7)))
         }
         return out
+    }
+}
+
+public enum ClaudeWebError: LocalizedError {
+    case noActiveOrgCookie
+
+    public var errorDescription: String? {
+        String(localized: "Claude has not opened a workspace of this account yet. Open it once in Claude, then switch here.")
     }
 }

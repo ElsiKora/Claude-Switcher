@@ -18,7 +18,12 @@ public final class SafeStorage: Sendable {
         guard value.count > 3 + kCCBlockSizeAES128, value.prefix(3) == Data("v10".utf8) else {
             throw .unexpectedFormat
         }
-        return try Self.aesCBCDecrypt(value.dropFirst(3), key: appKey())
+        return try Self.aesCBC(kCCDecrypt, value.dropFirst(3), key: appKey())
+    }
+
+    /// The inverse of `decrypt`: a "v10" value Claude reads back.
+    public func encrypt(_ plain: Data) throws(SafeStorageError) -> Data {
+        try Data("v10".utf8) + Self.aesCBC(kCCEncrypt, plain, key: appKey())
     }
 
     private func appKey() throws(SafeStorageError) -> Data {
@@ -55,14 +60,14 @@ public final class SafeStorage: Sendable {
         return Data(out)
     }
 
-    static func aesCBCDecrypt(_ ciphertext: Data, key: Data) throws(SafeStorageError) -> Data {
+    static func aesCBC(_ operation: Int, _ ciphertext: Data, key: Data) throws(SafeStorageError) -> Data {
         let iv = [UInt8](repeating: UInt8(ascii: " "), count: kCCBlockSizeAES128)
         var out = [UInt8](repeating: 0, count: ciphertext.count + kCCBlockSizeAES128)
         var moved = 0
         let status = ciphertext.withUnsafeBytes { ct in
             key.withUnsafeBytes { k in
                 CCCrypt(
-                    CCOperation(kCCDecrypt), CCAlgorithm(kCCAlgorithmAES), CCOptions(kCCOptionPKCS7Padding),
+                    CCOperation(operation), CCAlgorithm(kCCAlgorithmAES), CCOptions(kCCOptionPKCS7Padding),
                     k.baseAddress, k.count, iv, ct.baseAddress, ct.count, &out, out.count, &moved)
             }
         }
