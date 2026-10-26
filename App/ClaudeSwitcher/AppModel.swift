@@ -46,6 +46,9 @@ final class AppModel {
     private(set) var state: SwitcherState
     private(set) var active: String?
     private(set) var claudeRunning = false
+    /// Whether macOS lets the switcher answer Claude's "Claude is still working" prompt.
+    private(set) var quitPromptAllowed = true
+    private var askedForAccessibility = false
     private(set) var lastChat: Date?
     private(set) var phase: Phase?
     private(set) var step: Phase.Step?
@@ -280,6 +283,7 @@ final class AppModel {
         now = .now
         guard !isDemo else { return }
         claudeRunning = ClaudeProcess.isRunning
+        quitPromptAllowed = QuitPrompt.isAllowed
         guard !isBusy else { return }
         let desktop = engine.desktop
         let current = try? desktop.activeAccount()
@@ -765,6 +769,19 @@ final class AppModel {
 
     func dismissCutOff() { cutOff = [] }
 
+    /// Asks macOS for Accessibility, which answers Claude's quit prompt during
+    /// a switch; once asked, opens the Accessibility list in System Settings.
+    func allowQuitPrompt() {
+        if askedForAccessibility || QuitPrompt.isAllowed {
+            let pane = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            if let url = URL(string: pane) { NSWorkspace.shared.open(url) }
+        } else {
+            QuitPrompt.requestAccess()
+        }
+        askedForAccessibility = true
+        quitPromptAllowed = QuitPrompt.isAllowed
+    }
+
     /// Claude continues the four most recent marked chats on its own and the
     /// rest when they are opened, so the rest are opened one by one.
     private func continueRest(_ chats: [CutOffTurns.Chat]) {
@@ -850,7 +867,7 @@ final class AppModel {
         let holding = state.holdChats
         do {
             step = .quit
-            let live = try await ClaudeProcess.quit()
+            let live = try await ClaudeProcess.quit(desktop: engine.desktop)
             step = phase.steps.contains(.swap) ? .swap : .chats
             var engine = engine
             engine.liveConversations = live

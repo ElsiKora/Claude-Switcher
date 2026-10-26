@@ -79,7 +79,7 @@ It runs in the menu bar, reads each account's 5-hour and weekly limits from Anth
 - ✨ **Add Account**: restarts Claude on its sign-in screen and keeps your current sign-in. Sign in with the other account and Claude Switcher picks it up.
 - ✨ **Add Several Accounts**: chats a restart cuts off wait while you add accounts one after another; press Done on the last one and every waiting chat continues there.
 - ✨ **Shared chats and projects**: every account's Claude Code chat list holds the same chats. Chats you deleted stay deleted.
-- ✨ **Work continues after a switch**: chats that were mid-turn, running a command, or waiting on a background agent are marked as interrupted. Claude continues the main chats, and they check on their side sessions.
+- ✨ **Work continues after a switch**: chats that were mid-turn, running a command, waiting on a background agent, or stopped by the usage limit are marked as interrupted. Claude continues the main chats, and they check on their side sessions.
 - ✨ **Live limits**: both limits of every account, as rings in the menu bar and the window, with their reset times and when they run out at the pace of the last checks.
 - ✨ **Automatic switching** (optional), built to switch rarely, since every switch makes each open chat read its context again in the new account:
   - before the limit runs out at the current pace, or at your threshold at the latest; earlier on an account with extra usage on;
@@ -237,6 +237,9 @@ Open Claude Switcher while Claude is signed in. The account shows up within a mi
 > [!IMPORTANT]
 > The first read asks for access to **Claude Safe Storage** in your keychain. That is the key Claude encrypts its sign-in with, and Claude Switcher needs it to read the sign-in. Click **Always Allow**.
 
+> [!TIP]
+> With automatic switching on, the menu bar panel asks you to allow Claude Switcher in **Privacy & Security → Accessibility**. When chats are working, Claude asks "Claude is still working" before it quits, and Claude Switcher answers **Quit anyway** for you. Without the permission, a switch waits up to 100 seconds for that answer and then closes Claude by force.
+
 ### More Accounts
 
 Click **Add Account…**. Claude restarts on its sign-in screen and your current sign-in is kept. Sign in with the other account. Claude Switcher adds it and brings your chats and projects into it.
@@ -313,7 +316,7 @@ Claude Switcher switches the Claude desktop app. Analytics and the chat list als
 <details>
 <summary><strong>Will a switch interrupt my running agents?</strong></summary>
 
-Claude has to restart to change accounts, so running turns stop. Before the restart, Claude Switcher marks every chat that was working, running a command, or waiting on a background agent. After the restart, Claude continues the main chats, and they check on their side sessions.
+Claude has to restart to change accounts, so running turns stop. Before the restart, Claude Switcher marks every chat that was working, running a command, waiting on a background agent, or stopped by the account's usage limit. After the restart, Claude continues the main chats, and they check on their side sessions.
 
 </details>
 
@@ -327,7 +330,7 @@ It is what the same tokens would cost through the Anthropic API, priced per repl
 <details>
 <summary><strong>Why does macOS ask for my keychain after an update?</strong></summary>
 
-Builds are signed ad hoc, so each new build counts as a new app for the keychain. Click **Always Allow** once per build.
+Builds are signed ad hoc, so each new build counts as a new app for the keychain. Click **Always Allow** once per build. For the same reason, turn Claude Switcher on again in **Privacy & Security → Accessibility** after an update.
 
 </details>
 

@@ -372,11 +372,14 @@ private func write(_ text: String, _ url: URL) throws {
         // Working, but its process had already gone to sleep.
         try chat("asleep", [working])
         try chat("idle", [done])
+        // Stopped by the account's limit; its process went to sleep since.
+        let limit = #"{"type":"assistant","timestamp":"\#(at)","error":"rate_limit","isApiErrorMessage":true,"message":{"model":"<synthetic>","stop_reason":"stop_sequence"}}"#
+        try chat("limited", [working, limit], active: 1_999_999_820_000)
 
         let live = LiveConversations(ids: ["lead", "side1", "side2", "side1a", "solo", "idle"])
         let marked = try CutOffTurns.mark(desktop: desktop, account: "A", org: "O", live: live, projects: projects, now: now)
-        #expect(marked.map(\.id) == ["solo", "lead"])
-        #expect(marked.map(\.sideSessions) == [0, 2])
+        #expect(marked.map(\.id) == ["limited", "solo", "lead"])
+        #expect(marked.map(\.sideSessions) == [0, 0, 2])
         let lead = try JSONObjectText(contentsOf: desktop.sessionsRoot.appending(path: "A/O/local_lead.json"))
         #expect(lead.raw("interruptedByQuitAt") == Data("2000000000000".utf8))
         #expect(lead.raw("interruptedAwaitingPerson") == Data("false".utf8))

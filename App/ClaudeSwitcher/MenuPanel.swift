@@ -352,6 +352,12 @@ struct PanelNotices: View {
                     .disabled(model.isBusy || model.phase == .waitingForSignIn)
                 }
             }
+            if (model.state.autoSwitch || model.state.spendWeekly) && !model.quitPromptAllowed {
+                NoticeRow(systemImage: "hand.raised.fill", tint: .orange,
+                          text: String(localized: "Allow Claude Switcher in Accessibility so a switch can close Claude while chats work. Until then, a switch waits for Claude.")) {
+                    Button("Allow…") { model.allowQuitPrompt() }
+                }
+            }
             if let error = model.error {
                 NoticeRow(systemImage: "exclamationmark.triangle.fill", tint: .orange, text: error) {
                     Button("Dismiss") { model.dismissError() }

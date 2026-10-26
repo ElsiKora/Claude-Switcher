@@ -11,7 +11,9 @@ public import Foundation
 /// that tool had run, or its turn had ended while work it started in the
 /// background went on: a shell command or Monitor (a child shell of the
 /// process) or a background agent or workflow (launched in the transcript
-/// by this process, with no completion notification after it). Side sessions are not marked themselves: the main chat that started
+/// by this process, with no completion notification after it). A chat whose
+/// turn the account's usage limit stopped was cut off too, whether or not
+/// its process still runs: it waits for an account with room. Side sessions are not marked themselves: the main chat that started
 /// them is, so it checks on its sessions and continues them, the way the
 /// person would after a restart. A cut-off chat without a main chat is
 /// marked itself. Claude did not mark any chat on the first real run, so the
@@ -63,14 +65,21 @@ public enum CutOffTurns {
                 armedAtQuit: object.raw("armedWorkAtQuit").flatMap(armedWork))
         }
 
+        let since = Int64((now.timeIntervalSince1970 - window) * 1000)
         func cutOff(_ e: Entry) -> Bool {
-            guard !e.archived, let cli = e.cli, live.ids.contains(cli) else { return false }
+            guard !e.archived, let cli = e.cli else { return false }
+            let isLive = live.ids.contains(cli)
+            guard isLive || e.lastActivity >= since else { return false }
+            let transcript = transcript(cli, in: projects)
+            let turn = transcript.map(lastTurn) ?? .ended
+            if case let .stoppedByLimit(at) = turn { return now.timeIntervalSince(at) < window }
+            guard isLive else { return false }
             if live.runningCommands.contains(cli) { return true }
             // Timers like /loop live in the Claude Code process and stop with
             // it: the chat continues and sets them up again.
             if let armed = e.armedAtQuit, armed.count > 0, now.timeIntervalSince(armed.at) < 15 * 60 { return true }
-            guard let transcript = transcript(cli, in: projects) else { return false }
-            if let since = inFlightSince(transcript), now.timeIntervalSince(since) < window { return true }
+            if case let .inFlight(at) = turn, now.timeIntervalSince(at) < window { return true }
+            guard let transcript else { return false }
             return backgroundTasksRunning(transcript, since: live.startedAt[cli] ?? now)
         }
         /// The main chat at the top of a chat's chain of side sessions.
@@ -173,14 +182,22 @@ public enum CutOffTurns {
         return !launched.subtracting(reported).isEmpty
     }
 
-    /// When the last turn of a conversation started waiting for the model or
-    /// a tool, nil when its last turn finished.
-    static func inFlightSince(_ transcript: URL) -> Date? {
-        guard let handle = try? FileHandle(forReadingFrom: transcript) else { return nil }
+    /// Where the last turn of a conversation stands.
+    enum LastTurn: Equatable {
+        case ended
+        /// Waiting for the model or a tool since then.
+        case inFlight(since: Date)
+        /// Stopped then by the account's usage limit (a 5-hour, weekly or
+        /// spend limit), which Claude Code records as a finished reply.
+        case stoppedByLimit(at: Date)
+    }
+
+    static func lastTurn(_ transcript: URL) -> LastTurn {
+        guard let handle = try? FileHandle(forReadingFrom: transcript) else { return .ended }
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0
         try? handle.seek(toOffset: size > 524_288 ? size - 524_288 : 0)
-        guard let data = try? handle.readToEnd() else { return nil }
+        guard let data = try? handle.readToEnd() else { return .ended }
         let lines = data.split(separator: UInt8(ascii: "\n"))
         for line in lines.reversed() {
             guard let record = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
@@ -189,12 +206,15 @@ public enum CutOffTurns {
             else { continue }
             let at = (record["timestamp"] as? String).flatMap(AnthropicAPI.date) ?? .distantPast
             let message = record["message"] as? [String: Any] ?? [:]
-            if type == "user" { return at }
+            if type == "user" { return .inFlight(since: at) }
+            if record["isApiErrorMessage"] as? Bool == true, record["error"] as? String == "rate_limit" {
+                return .stoppedByLimit(at: at)
+            }
             switch message["stop_reason"] as? String {
-            case "end_turn", "stop_sequence", "max_tokens", "refusal": return nil
-            default: return at
+            case "end_turn", "stop_sequence", "max_tokens", "refusal": return .ended
+            default: return .inFlight(since: at)
             }
         }
-        return nil
+        return .ended
     }
 }

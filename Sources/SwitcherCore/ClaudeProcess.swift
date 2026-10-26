@@ -31,27 +31,34 @@ public enum ClaudeProcess {
         running.first?.bundleURL ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: ClaudeDesktop.bundleIdentifier)
     }
 
-    /// Closes Claude the way it closes itself on SIGTERM: without the "Claude
-    /// is still working" dialog, but with its full shutdown, so it saves every
-    /// chat and marks the turns it cut off to continue them on the next start.
-    /// That shutdown may take up to 75 s plus a 15 s watchdog; Claude is only
-    /// ended by force once all of it has run out.
+    /// Closes Claude with its full shutdown, so it saves every chat and marks
+    /// the turns it cut off to continue them on the next start. SIGTERM
+    /// quits it as its Quit command does: with chats at work it first asks
+    /// "Claude is still working", and the switcher answers "Quit anyway"
+    /// when macOS lets it (see `QuitPrompt`). The shutdown may take up to
+    /// 75 s plus a 15 s watchdog; Claude is only ended by force once all of
+    /// it has run out, or when the prompt stays unanswered that long.
     /// Returns what Claude Code was running right before.
     @discardableResult
-    public static func quit(grace: Duration = .seconds(100)) async throws -> LiveConversations {
+    public static func quit(desktop: ClaudeDesktop = .standard, grace: Duration = .seconds(100)) async throws -> LiveConversations {
         let apps = running
         guard !apps.isEmpty else { return LiveConversations() }
         let live = liveConversations()
+        let title = QuitPrompt.quitAnywayTitle(app: apps.first?.bundleURL, desktop: desktop)
         for app in apps { kill(app.processIdentifier, SIGTERM) }
-        if await waitGone(within: grace) { return live }
+        if await waitGone(within: grace, answering: apps.map(\.processIdentifier), title: title) { return live }
         for app in running { app.forceTerminate() }
         if await waitGone(within: .seconds(10)) { return live }
         throw SwitchError.claudeDidNotQuit
     }
 
-    private static func waitGone(within timeout: Duration) async -> Bool {
+    /// Waits for Claude and its helpers to be gone, pressing `title` in its
+    /// quit prompt for `pids` once the prompt shows.
+    private static func waitGone(within timeout: Duration, answering pids: [pid_t] = [], title: String = "") async -> Bool {
         let clock = ContinuousClock()
         let deadline = clock.now + timeout
+        var answered = pids.isEmpty
+        var nextLook = clock.now
         while clock.now < deadline {
             if running.allSatisfy(\.isTerminated) || running.isEmpty {
                 // The helpers hold the cookie store until they are gone too.
@@ -59,6 +66,10 @@ public enum ClaudeProcess {
                     try? await Task.sleep(for: .milliseconds(250))
                 }
                 return true
+            }
+            if !answered, clock.now >= nextLook, QuitPrompt.isAllowed {
+                answered = pids.contains { QuitPrompt.answer(pid: $0, title: title) }
+                nextLook = clock.now + .seconds(1)
             }
             try? await Task.sleep(for: .milliseconds(250))
         }

@@ -11,6 +11,9 @@ enum Entry {
         if CommandLine.arguments.contains("--probe-connectors") {
             ProbeConnectorsCommand.run()
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--probe-quit-prompt") {
+            ProbeQuitPromptCommand.run(CommandLine.arguments.dropFirst(i + 1))
+        }
         if CommandLine.arguments.contains("--probe-orgs") {
             ProbeOrgsCommand.run()
         }
@@ -226,6 +229,25 @@ enum StatusCommand {
 /// `ClaudeSwitcher --probe-connectors` reads, and only reads, each account's
 /// connectors and the permissions of one connector's tools from claude.ai,
 /// to show whether claude.ai answers this app. Prints names and status codes.
+/// `open -n -a "Claude Switcher" --stdout <file> --args --probe-quit-prompt <pid> [--press]`
+/// lists the buttons of the prompt `pid` shows and, with `--press`, presses
+/// the one a switch presses in Claude's quit prompt. Run through `open`, so
+/// that macOS checks the switcher's own Accessibility permission.
+enum ProbeQuitPromptCommand {
+    @MainActor static func run(_ args: ArraySlice<String>) -> Never {
+        guard let pid = args.first.flatMap({ pid_t($0) }) else {
+            print("usage: --probe-quit-prompt <pid> [--press]")
+            exit(2)
+        }
+        let title = QuitPrompt.quitAnywayTitle()
+        print("accessibility allowed:", QuitPrompt.isAllowed)
+        print("presses:", title)
+        print("buttons:", QuitPrompt.promptButtonTitles(pid: pid))
+        if args.contains("--press") { print("pressed:", QuitPrompt.answer(pid: pid, title: title)) }
+        exit(0)
+    }
+}
+
 /// `ClaudeSwitcher --probe-orgs` reads, and only reads, each saved
 /// account's organizations: what claude.ai lists for its session, which
 /// organizations its saved sign-in holds tokens for (key names only, never
