@@ -195,7 +195,7 @@ Claude-Switcher/
 
 1. Download `Claude-Switcher.dmg` from the [latest release](https://github.com/ElsiKora/Claude-Switcher/releases/latest) and open it.
 2. Drag **Claude Switcher** onto **Applications**.
-3. The build is signed ad hoc and not notarized, so macOS blocks it the first time. Open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
+3. The build is signed with ElsiKora's own certificate but not notarized, so macOS blocks it the first time. Open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
 
 A `.zip` of the app is attached to each release too.
 
@@ -328,9 +328,9 @@ It is what the same tokens would cost through the Anthropic API, priced per repl
 </details>
 
 <details>
-<summary><strong>Why does macOS ask for my keychain after an update?</strong></summary>
+<summary><strong>Will macOS ask for keychain and Accessibility again after an update?</strong></summary>
 
-Builds are signed ad hoc, so each new build counts as a new app for the keychain. Click **Always Allow** once per build. For the same reason, turn Claude Switcher on again in **Privacy & Security → Accessibility** after an update.
+From 0.4.4 on, builds are signed with the same ElsiKora certificate, so macOS treats every update as the same app and keeps both. Earlier builds were signed ad hoc, which made each one a new app: when you update from one of them, click **Always Allow** once more, remove the old Claude Switcher from **Privacy & Security → Accessibility** with **−**, and allow it again from the menu bar panel.
 
 </details>
 
