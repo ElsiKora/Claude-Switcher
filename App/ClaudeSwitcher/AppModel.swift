@@ -121,7 +121,7 @@ final class AppModel {
     }
 
     var hasNotices: Bool {
-        error != nil || phase != nil || autoNote != nil || availableUpdate != nil || !cutOff.isEmpty
+        error != nil || phase != nil || autoNote != nil || availableUpdate != nil || !cutOff.isEmpty || state.holdChats
     }
     var activeAccount: Account? { state.account(active) }
     /// The account Claude is signed in to, in the workspace it has open.
@@ -282,7 +282,9 @@ final class AppModel {
         let current = try? desktop.activeAccount()
         active = current
         if current != nil { noteSignIn() }
-        lastChat = ChatSync.lastChatActivity(root: desktop.sessionsRoot, projects: UsageIndex.defaultProjects)
+        // Thousands of transcripts: read off the main thread, or the window stutters.
+        let root = desktop.sessionsRoot
+        lastChat = await Task.detached { ChatSync.lastChatActivity(root: root, projects: UsageIndex.defaultProjects) }.value
 
         await noteActiveOrg()
 
@@ -398,7 +400,7 @@ final class AppModel {
     /// replies, waiting at most `Policy.pauseWait`.
     private func switchIfDue() async {
         // Only "use up expiring weeks" waits for idle chats, so only it needs the process list.
-        let live = state.spendWeekly ? ClaudeProcess.liveConversations() : LiveConversations()
+        let live = state.spendWeekly ? await Task.detached { ClaudeProcess.liveConversations() }.value : LiveConversations()
         var context = Policy.Context(claudeRunning: claudeRunning, lastChat: lastChat,
                                      commandRunning: !live.runningCommands.isEmpty, now: now)
         guard var decision = Policy.autoTarget(state, active: activeSeatID, context: context) else {
@@ -641,6 +643,12 @@ final class AppModel {
             phase = .waitingForSignIn
             step = .signIn
         }
+    }
+
+    /// Adding several accounts: chats wait from now on, and the first one is added.
+    func addSeveralAccounts() async {
+        await setHoldChats(true)
+        await addAccount()
     }
 
     func cancelAdding() {

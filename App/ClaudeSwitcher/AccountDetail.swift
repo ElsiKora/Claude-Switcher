@@ -338,7 +338,7 @@ struct WorkspacesSection: View {
         } header: {
             Text("Workspaces")
         } footer: {
-            Text("Each workspace has limits of its own, and the switcher counts all of them. Switching between workspaces keeps the account signed in: Claude restarts in the other one. A workspace left out of automatic switching still shows here and in the menu bar, and you can switch to it by hand.")
+            Text("Each workspace has limits of its own, and the switcher counts all of them; the checkmark marks the one open in Claude. Switch workspaces in Claude itself, and the switcher follows. Automatic switching may also move between them when one runs low, unless you leave a workspace out.")
         }
     }
 
@@ -347,14 +347,13 @@ struct WorkspacesSection: View {
         let isOpen = seat.orgID == account.org
         let signedIn = account.id == model.active
         return LabeledContent {
-            HStack(spacing: 10) {
-                AccountRings(account: seat.inWorkspace, size: 28)
-                if isOpen, signedIn {
-                    Text("Open in Claude").foregroundStyle(.secondary)
-                } else {
-                    Button(signedIn ? "Switch" : "Switch to This") { Task { await model.switchTo(seat) } }
-                        .disabled(model.isBusy || !model.hasSignIn(account))
+            HStack(spacing: 8) {
+                if isOpen {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(signedIn ? .green : .secondary)
+                        .help(signedIn ? "Claude has this workspace open" : "The workspace this account opens in")
                 }
+                AccountRings(account: seat.inWorkspace, size: 28)
             }
         } label: {
             Label {

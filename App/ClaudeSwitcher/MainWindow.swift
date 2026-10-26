@@ -61,11 +61,7 @@ struct MainWindow: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                VStack(alignment: .leading, spacing: 10) {
-                    HoldChatsToggle()
-                    AddAccountButton()
-                        .buttonStyle(.borderless)
-                }
+                AddAccountButton()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)

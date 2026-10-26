@@ -32,6 +32,13 @@ enum Demo {
         ]
         st.accounts[0].usage?.extra = ExtraUsage(enabled: true, usedCents: 4_210, limitCents: 20_000, currency: "USD")
         st.accounts[1].usage?.extra = ExtraUsage(enabled: false, usedCents: nil, limitCents: nil, currency: nil)
+        // Studio is in a team too: two workspaces, Team open.
+        var personal = Org(id: "org-a2p", name: "Studio's Organization", kind: .personal)
+        personal.usage = Usage(session: 0, sessionReset: nil, weekly: 12, weeklyReset: now.addingTimeInterval(80 * 3600), checkedAt: now)
+        var team = Org(id: "org-a2", name: "Acme", kind: .team)
+        team.usage = st.accounts[1].usage
+        st.accounts[1].orgs = [personal, team]
+        st.accounts[1].plan = "Team"
         // A different account every couple of days, for the analytics page.
         var timeline = AccountTimeline()
         let ids = ["a2", "a3", "a1"]

@@ -25,7 +25,8 @@ struct MenuPanel: View {
                     .padding(.bottom, 8)
             }
 
-            let others = model.sortedSeats.filter { $0.id != model.activeSeatID }
+            // Workspaces are switched in Claude itself; here each account shows the one it has open.
+            let others = model.sortedAccounts.filter { $0.id != model.active }.compactMap { model.state.seat(of: $0) }
             if model.accounts.isEmpty {
                 Text("Sign in to Claude as usual. The account shows up here within a minute.")
                     .font(.system(size: 12))
@@ -43,10 +44,6 @@ struct MenuPanel: View {
             }
 
             Divider().padding(.horizontal, 14).padding(.vertical, 5)
-
-            HoldChatsToggle()
-                .padding(.horizontal, 14)
-                .padding(.vertical, 4)
 
             VStack(spacing: 0) {
                 AddAccountButton(style: .menuRow)
@@ -254,36 +251,44 @@ struct AddAccountButton: View {
 
     @Environment(AppModel.self) private var model
     var style: Style = .button
-    @State private var explaining = false
+    /// Which explanation is showing: one account, or several in a row.
+    @State private var explaining: Bool?
 
     var body: some View {
         switch style {
         case .button:
-            Button { explaining = true } label: { Label("Add Account…", systemImage: "plus") }
-                .disabled(!canAdd)
-                .alert("Add Another Account", isPresented: $explaining) {
-                    Button("Restart Claude") { Task { await model.addAccount() } }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("\(Self.explanation)\n\n\(Self.warning)")
+            Menu {
+                Button("Add Account\u{2026}") { explaining = false }
+                if !model.state.holdChats {
+                    Button("Add Several Accounts\u{2026}") { explaining = true }
                 }
+            } label: {
+                Label("Add Account\u{2026}", systemImage: "plus")
+            } primaryAction: {
+                explaining = false
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(!canAdd)
+            .alert(title, isPresented: Binding(get: { explaining != nil }, set: { if !$0 { explaining = nil } })) {
+                Button("Restart Claude") { start() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(message)
+            }
         case .menuRow:
             // An alert would take focus from the menu bar panel and close it,
             // so the panel asks in place.
-            if explaining {
+            if explaining != nil {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Add Another Account").font(.system(size: 13, weight: .semibold))
-                    Text(Self.explanation).font(.system(size: 12)).foregroundStyle(.secondary)
-                    Text(Self.warning).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(title).font(.system(size: 13, weight: .semibold))
+                    Text(message).font(.system(size: 12)).foregroundStyle(.secondary)
                     HStack {
                         Spacer()
-                        Button("Cancel") { explaining = false }
+                        Button("Cancel") { explaining = nil }
                             .keyboardShortcut(.cancelAction)
-                        Button("Restart Claude") {
-                            explaining = false
-                            Task { await model.addAccount() }
-                        }
-                        .keyboardShortcut(.defaultAction)
+                        Button("Restart Claude") { start() }
+                            .keyboardShortcut(.defaultAction)
                     }
                     .controlSize(.small)
                 }
@@ -292,48 +297,37 @@ struct AddAccountButton: View {
                 .background(.quaternary.opacity(0.6), in: .rect(cornerRadius: 10, style: .continuous))
                 .padding(.vertical, 2)
             } else {
-                MenuRow("Add Account…", systemImage: "plus") { explaining = true }
+                MenuRow("Add Account\u{2026}", systemImage: "plus") { explaining = false }
                     .disabled(!canAdd)
+                if !model.state.holdChats {
+                    MenuRow("Add Several Accounts\u{2026}", systemImage: "person.2") { explaining = true }
+                        .disabled(!canAdd)
+                }
             }
         }
     }
 
     private var canAdd: Bool { !model.isBusy && model.phase != .waitingForSignIn }
 
+    private var title: String {
+        explaining == true ? String(localized: "Add Several Accounts") : String(localized: "Add Another Account")
+    }
+
+    private var message: String {
+        explaining == true
+            ? "\(Self.explanation) \(Self.several)\n\n\(Self.warning)"
+            : "\(Self.explanation)\n\n\(Self.warning)"
+    }
+
+    private func start() {
+        let several = explaining == true
+        explaining = nil
+        Task { several ? await model.addSeveralAccounts() : await model.addAccount() }
+    }
+
     static let explanation = String(localized: "Your current sign-in is kept. Claude restarts on its sign-in screen; sign in there with the other account and Claude Switcher picks it up.")
+    static let several = String(localized: "Chats a restart cuts off wait until you press Done after the last account, and then continue there.")
     static let warning = String(localized: "Never use Sign Out in Claude to change accounts: it ends the saved sign-in.")
-}
-
-/// Adding several accounts: a switch that keeps cut-off chats waiting until
-/// it is turned off on the account they should continue in.
-struct HoldChatsToggle: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Toggle(isOn: Binding(get: { model.state.holdChats }, set: { on in Task { await model.setHoldChats(on) } })) {
-                Text("Adding several accounts")
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-            }
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            Text(detail)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .disabled(model.isBusy)
-        .help("While on, adding or switching accounts keeps cut-off chats waiting, and nothing switches on its own.")
-    }
-
-    private var detail: String {
-        let held = model.state.heldChats.count
-        guard model.state.holdChats else { return String(localized: "Chats wait while you add accounts one after another.") }
-        return held == 0
-            ? String(localized: "On. Turn it off on the last account.")
-            : String(localized: "\(held) chats wait. Turning this off continues them in \(model.activeAccount?.displayName ?? String(localized: "this account")).")
-    }
 }
 
 /// Errors, a switch in progress, a switch waiting for Claude to be idle, and update news.
@@ -342,6 +336,20 @@ struct PanelNotices: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if model.state.holdChats {
+                let held = model.state.heldChats.count
+                NoticeRow(systemImage: "person.badge.plus", tint: .blue,
+                          text: held == 0
+                              ? String(localized: "Adding accounts. Chats wait until you press Done.")
+                              : String(localized: "Adding accounts. \(held) chats wait to continue in the account you finish on.")) {
+                    HStack(spacing: 10) {
+                        Button("Add Another") { Task { await model.addAccount() } }
+                        Button("Done") { Task { await model.setHoldChats(false) } }
+                            .fontWeight(.semibold)
+                    }
+                    .disabled(model.isBusy || model.phase == .waitingForSignIn)
+                }
+            }
             if let error = model.error {
                 NoticeRow(systemImage: "exclamationmark.triangle.fill", tint: .orange, text: error) {
                     Button("Dismiss") { model.dismissError() }
