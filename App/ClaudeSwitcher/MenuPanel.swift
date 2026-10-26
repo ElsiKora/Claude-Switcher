@@ -5,7 +5,6 @@ import SwitcherCore
 /// its rings, the others below, a click on one switches.
 struct MenuPanel: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -63,8 +62,7 @@ struct MenuPanel: View {
                     }
                 }
                 MenuRow("Open Claude Switcher", systemImage: "macwindow") {
-                    openWindow(id: MainWindow.id)
-                    NSApp.activate()
+                    model.showMainWindow?()
                 }
                 Divider().padding(.horizontal, 9).padding(.vertical, 5)
                 MenuRow("Quit Claude Switcher", systemImage: "power") { NSApp.terminate(nil) }

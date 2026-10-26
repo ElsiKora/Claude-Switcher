@@ -71,13 +71,43 @@ struct ClaudeSwitcherApp: App {
     }
 }
 
-/// Opening the app again, from the Dock, Finder or Spotlight, shows its window.
+/// Opening the app again, from the Dock, Finder or Spotlight, shows its
+/// window. The Dock icon is there while a window is: closing the last one
+/// leaves the app in the menu bar only, the way menu bar apps do.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var openMainWindow: (() -> Void)?
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         openMainWindow?()
         return false
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { note in
+            let closing = note.object as? NSWindow
+            MainActor.assumeIsolated {
+                guard let closing, Self.isAppWindow(closing) else { return }
+                // After the close: no other window of the app left, so no Dock icon.
+                DispatchQueue.main.async {
+                    if !NSApp.windows.contains(where: { $0 !== closing && $0.isVisible && Self.isAppWindow($0) }) {
+                        NSApp.setActivationPolicy(.accessory)
+                    }
+                }
+            }
+        }
+    }
+
+    /// A window of its own (main, welcome), not the menu bar panel, a sheet or a sign-in popup.
+    @MainActor
+    static func isAppWindow(_ window: NSWindow) -> Bool {
+        guard let id = window.identifier?.rawValue else { return false }
+        return id.hasPrefix(MainWindow.id) || id.hasPrefix("welcome")
+    }
+
+    /// Before a window opens: the Dock icon comes back with it.
+    @MainActor
+    static func showInDock() {
+        if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
     }
 }
 
@@ -93,11 +123,13 @@ struct StatusLabel: View {
             .accessibilityLabel("Claude Switcher")
             .task {
                 delegate.openMainWindow = {
+                    AppDelegate.showInDock()
                     openWindow(id: MainWindow.id)
                     NSApp.activate()
                 }
                 model.showMainWindow = delegate.openMainWindow
                 model.showWelcome = {
+                    AppDelegate.showInDock()
                     openWindow(id: "welcome")
                     NSApp.activate()
                 }
