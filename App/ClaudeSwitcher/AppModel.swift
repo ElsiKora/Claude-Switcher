@@ -719,7 +719,7 @@ final class AppModel {
             // Claude has just started; give it a moment before asking for a page.
             try? await Task.sleep(for: .seconds(6))
         }
-        openInClaude("/settings/connectors")
+        openInClaude("/customize/connectors")
         // Read the setup again once there was time to connect a few.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(90))

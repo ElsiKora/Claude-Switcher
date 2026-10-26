@@ -185,7 +185,7 @@ struct SetupSection: View {
             } footer: {
                 if (model.cloudSetups[seat.id]?.connectors.contains { !$0.connected } ?? false) {
                     Text(seat.id == model.activeSeatID
-                         ? String(localized: "Connect opens the Connectors page in Claude. Sign in to each connector there with its Connect button.")
+                         ? String(localized: "Connect opens Customize \u{2192} Connectors in Claude. Under Yours, sign in to each connector with its Connect button.")
                          : String(localized: "Connectors are signed in to in Claude, in the account and workspace it has open. Connect switches Claude to \(seat.displayName) first."))
                 }
             }
@@ -246,7 +246,7 @@ struct SetupSection: View {
                  icon: "point.3.connected.trianglepath.dotted", color: .blue,
                  state: missing.isEmpty && signIn.isEmpty ? nil : summary(missing: missing.count, signIn: signIn.count),
                  attention: !missing.isEmpty || !signIn.isEmpty,
-                 action: signIn.isEmpty ? nil : "Connect\u{2026}", path: "/settings/connectors",
+                 action: signIn.isEmpty ? nil : "Connect\u{2026}", path: "/customize/connectors",
                  perform: model.hasSignIn(account)
                      ? { if seat.id == model.activeSeatID { Task { await model.openConnectors(in: seat) } } else { switchingToConnect = true } }
                      : nil,
