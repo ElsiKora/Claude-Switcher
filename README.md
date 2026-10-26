@@ -77,7 +77,7 @@ It runs in the menu bar, reads each account's 5-hour and weekly limits from Anth
 
 - ✨ **One-click switch**: quits Claude cleanly (the same shutdown as quitting it yourself), swaps the sign-in and opens Claude again.
 - ✨ **Add Account**: restarts Claude on its sign-in screen and keeps your current sign-in. Sign in with the other account and Claude Switcher picks it up.
-- ✨ **Adding several accounts**: a switch that keeps cut-off chats waiting while you add accounts one after another. Turn it off on the last one and every waiting chat continues there.
+- ✨ **Add Several Accounts**: chats a restart cuts off wait while you add accounts one after another; press Done on the last one and every waiting chat continues there.
 - ✨ **Shared chats and projects**: every account's Claude Code chat list holds the same chats. Chats you deleted stay deleted.
 - ✨ **Work continues after a switch**: chats that were mid-turn, running a command, or waiting on a background agent are marked as interrupted. Claude continues the main chats, and they check on their side sessions.
 - ✨ **Live limits**: both limits of every account, as rings in the menu bar and the window, with their reset times and when they run out at the pace of the last checks.
@@ -88,7 +88,8 @@ It runs in the menu bar, reads each account's 5-hour and weekly limits from Anth
   - to an account whose week resets within a day, only when that week is worth clearly more than the switch costs;
   - paused for two hours with one click.
 - ✨ **Same setup everywhere**: compares each account's connectors, tool permissions, plugins and skills on claude.ai with a reference account. Copy Setup adds what is missing, and only runs when you click it.
-- ✨ **Workspaces**: an account in a team shows its Personal and Team workspaces, each with its own limits and its own setup; automatic switching counts every workspace, and you can leave one out.
+- ✨ **Workspaces**: an account in a team shows its Personal and Team workspaces, each with its own limits and its own setup; automatic switching counts every workspace, and you can leave one out. Switch workspaces in Claude, and the switcher follows.
+- ✨ **Free accounts stay out of the way**: an account without a plan Claude Code runs on is marked Free and never rotated to.
 - ✨ **Claude Code settings in sync**: session presets, folder permissions and sidebar sections follow you from one account to the next.
 - ✨ **Analytics**: tokens, replies, cache hits and API-price value:
   - filtered by account and model, for today, 7 or 30 days, this month or all time;
@@ -107,6 +108,10 @@ It runs in the menu bar, reads each account's 5-hour and weekly limits from Anth
 
 <p align="center">
   <img src="docs/assets/account.png" width="860" alt="Account page with limits and setup">
+</p>
+
+<p align="center">
+  <img src="docs/assets/workspaces.png" width="860" alt="An account with Personal and Team workspaces">
 </p>
 
 <p align="center">
@@ -254,7 +259,11 @@ In **Settings → Automatic Switching** you can turn on:
 
 ### Adding Several Accounts
 
-Turn on **Adding several accounts** in the menu bar panel or the window, then add or switch accounts as often as you like: chats a restart cuts off wait instead of continuing, and nothing switches on its own. Turn it off on the account the chats should continue in; Claude restarts once and continues them all there.
+Choose **Add Several Accounts…** in the menu bar panel, or from the arrow next to **Add Account…** in the window. Sign in to one account after another with **Add Another**: chats a restart cuts off wait instead of continuing, and nothing switches on its own. Press **Done** on the account they should continue in; Claude restarts once and continues them all there.
+
+### Workspaces
+
+When an account belongs to a team, its page shows a **Workspaces** section: its own plan (Personal) and each Team or Enterprise workspace, with the limits of each. A checkmark marks the one Claude has open. Switch workspaces in Claude itself; Claude Switcher follows. Automatic switching counts every workspace and may move Claude between them when one runs low; turn off **Use for automatic switching** under a workspace to leave it out. Free workspaces and accounts without a plan Claude Code runs on are shown but never rotated to.
 
 ### Connectors
 
@@ -288,6 +297,7 @@ Prints every saved account with its usage, then exits.
 | Analytics and the all-chats table                       | ✅ Done        |
 | Shortcuts, notifications, start at login                | ✅ Done        |
 | Forecast-driven switching, pause, plan vs extra usage   | ✅ Done        |
+| Personal and Team workspaces, setup per workspace       | ✅ Done        |
 | Desktop and Notification Center widgets                 | 🚧 In Progress |
 | Signed and notarized releases                           | 🚧 In Progress |
 
