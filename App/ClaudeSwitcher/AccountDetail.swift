@@ -132,7 +132,6 @@ struct SetupSection: View {
     @Environment(AppModel.self) private var model
     let seat: Seat
     @State private var confirming = false
-    @State private var switchingToConnect = false
 
     private var account: Account { seat.account }
 
@@ -184,17 +183,10 @@ struct SetupSection: View {
                 if let org = seat.org { Text("Setup in \(org.label)") } else { Text("Setup") }
             } footer: {
                 if (model.cloudSetups[seat.id]?.connectors.contains { !$0.connected } ?? false) {
-                    Text(seat.id == model.activeSeatID
-                         ? String(localized: "Connect opens Customize \u{2192} Connectors in Claude. Under Yours, sign in to each connector with its Connect button.")
-                         : String(localized: "Connectors are signed in to in Claude, in the account and workspace it has open. Connect switches Claude to \(seat.displayName) first."))
+                    Text("Connectors are signed in to in Claude: Customize \u{2192} Connectors, under Yours.")
                 }
             }
             .task(id: seat.id) { await model.refreshCloudSetups() }
-            .confirmationDialog("Switch Claude to \(seat.displayName)?", isPresented: $switchingToConnect) {
-                Button("Switch and Open Connectors") { Task { await model.openConnectors(in: seat) } }
-            } message: {
-                Text("Connectors are signed in to in Claude, in the account and workspace it has open. Claude restarts in \(seat.displayName), and its Connectors page opens. Chats it cuts off continue.")
-            }
             .confirmationDialog("Set up \(seat.displayName) like \(reference.displayName)?", isPresented: $confirming) {
                 Button("Copy Setup") { Task { await model.copySetup(to: seat) } }
             } message: {
@@ -208,7 +200,6 @@ struct SetupSection: View {
     @ViewBuilder
     private func setupRow(_ title: LocalizedStringKey, subtitle: String, icon: String, color: Color,
                           state: String?, attention: Bool, action: LocalizedStringKey?, path: String,
-                          perform: (() -> Void)? = nil,
                           notes: [(LocalizedStringKey, [String])]) -> some View {
         LabeledContent {
             HStack(spacing: 10) {
@@ -217,9 +208,7 @@ struct SetupSection: View {
                 } else {
                     Image(systemName: "checkmark").foregroundStyle(.secondary)
                 }
-                if let action, let perform {
-                    Button(action, action: perform)
-                } else if let action, seat.id == model.activeSeatID {
+                if let action, seat.id == model.activeSeatID {
                     Button(action) { model.openInClaude(path) }
                 }
             }
@@ -246,10 +235,7 @@ struct SetupSection: View {
                  icon: "point.3.connected.trianglepath.dotted", color: .blue,
                  state: missing.isEmpty && signIn.isEmpty ? nil : summary(missing: missing.count, signIn: signIn.count),
                  attention: !missing.isEmpty || !signIn.isEmpty,
-                 action: signIn.isEmpty ? nil : "Connect\u{2026}", path: "/customize/connectors",
-                 perform: model.hasSignIn(account)
-                     ? { if seat.id == model.activeSeatID { Task { await model.openConnectors(in: seat) } } else { switchingToConnect = true } }
-                     : nil,
+                 action: nil, path: "/customize/connectors",
                  notes: [("Missing", missing.map(\.name)), ("Needs sign-in", signIn.map(\.name))])
     }
 

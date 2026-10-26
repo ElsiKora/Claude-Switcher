@@ -89,7 +89,6 @@ It runs in the menu bar, reads each account's 5-hour and weekly limits from Anth
   - paused for two hours with one click.
 - ✨ **Same setup everywhere**: compares each account's connectors, tool permissions, plugins and skills on claude.ai with a reference account. Copy Setup adds what is missing, and only runs when you click it.
 - ✨ **Workspaces**: an account in a team shows its Personal and Team workspaces, each with its own limits and its own setup; automatic switching counts every workspace, and you can leave one out.
-- ✨ **Connect in Claude**: Connect… opens the Connectors page in Claude, switching Claude to that account and workspace first when needed.
 - ✨ **Claude Code settings in sync**: session presets, folder permissions and sidebar sections follow you from one account to the next.
 - ✨ **Analytics**: tokens, replies, cache hits and API-price value:
   - filtered by account and model, for today, 7 or 30 days, this month or all time;
@@ -259,7 +258,7 @@ Turn on **Adding several accounts** in the menu bar panel or the window, then ad
 
 ### Connectors
 
-Connectors, plugins and skills live in a workspace on claude.ai, so each workspace has its own Setup section, compared with the reference you pick (any account or workspace). **Copy Setup…** adds what is missing, then reads claude.ai again and says what is there. **Connect…** opens the Connectors page in Claude, where you sign in to each connector with its own Connect button; for a workspace Claude does not have open, it offers to switch Claude there first.
+Connectors, plugins and skills live in a workspace on claude.ai, so each workspace has its own Setup section, compared with the reference you pick (any account or workspace). **Copy Setup…** adds what is missing, then reads claude.ai again and says what is there. New connectors are signed in to in Claude, under Customize → Connectors.
 
 ### Command Line
 

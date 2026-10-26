@@ -708,25 +708,6 @@ final class AppModel {
         showMainWindow?()
     }
 
-    /// Connectors are signed in to in Claude, in the account and workspace it
-    /// has open: opens Claude's Connectors page there, switching Claude to
-    /// `seat` first when it has another one open. Each connector's Connect
-    /// button on that page signs it in.
-    func openConnectors(in seat: Seat) async {
-        if seat.id != activeSeatID {
-            await switchTo(seat)
-            guard seat.id == activeSeatID else { return }
-            // Claude has just started; give it a moment before asking for a page.
-            try? await Task.sleep(for: .seconds(6))
-        }
-        openInClaude("/customize/connectors")
-        // Read the setup again once there was time to connect a few.
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(90))
-            await self?.refreshCloudSetups(force: true)
-        }
-    }
-
     /// Opens a claude.ai page inside Claude, in the account it is signed in with.
     func openInClaude(_ path: String) {
         if let url = URL(string: "claude://claude.ai\(path)") { NSWorkspace.shared.open(url) }
