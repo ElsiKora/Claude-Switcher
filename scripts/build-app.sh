@@ -26,7 +26,14 @@ if [[ -f "$signing/signing.keychain-db" ]]; then
   keychain="$signing/signing.keychain-db"
   security unlock-keychain -p "$(<"$signing/keychain-password")" "$keychain"
   identity=$(security find-certificate -c "ElsiKora Claude Switcher" -Z "$keychain" | awk '/^SHA-1 hash:/ { print $3 }')
-  codesign --force --sign "$identity" --keychain "$keychain" --identifier com.elsikora.ClaudeSwitcher "$app"
+  # codesign finds the private key only in the keychain search list, so the
+  # signing keychain joins it for the signature and leaves it right after.
+  searchlist=("${(@f)$(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')}")
+  security list-keychains -d user -s "${searchlist[@]}" "$keychain"
+  trap 'security list-keychains -d user -s "${searchlist[@]}"' EXIT
+  codesign --force --sign "$identity" --identifier com.elsikora.ClaudeSwitcher "$app"
+  security list-keychains -d user -s "${searchlist[@]}"
+  trap - EXIT
   codesign -dr - "$app" 2>&1 | grep -q 'certificate root' || { echo "signature has no certificate requirement" >&2; exit 1; }
 else
   echo "no signing identity in $signing: the build stays signed ad hoc" >&2
