@@ -331,7 +331,7 @@ struct AnalyticsView: View {
             // The split is known from the first usage check that saw extra usage on,
             // and always for an account with extra usage off: its plan covered everything.
             let since = key.account.map { r.extraSince[$0] } ?? r.extraSince.values.min()
-            let tracked = key.account.map(planOnly) ?? false
+            let tracked = key.account.map { planOnly($0, from: key.day ?? range.dates.lowerBound) } ?? false
                 || since.map { s in key.day.map { $0.addingTimeInterval(86_400) > s } ?? true } ?? false
             return BreakdownItem(
                 id: "\(key.day?.timeIntervalSince1970 ?? 0)|\(key.account ?? "")|\(key.model ?? "")",
@@ -426,14 +426,19 @@ struct AnalyticsView: View {
         }
     }
 
-    /// An account claude.ai cannot charge beyond its plan: extra usage is off.
-    private func planOnly(_ id: String) -> Bool {
-        model.state.account(id)?.usage?.extra.map { !$0.enabled } ?? false
+    /// Whether everything an account used from `start` on was covered by its
+    /// plan: its extra usage is off, or nothing has been billed this month
+    /// and `start` is in this month.
+    private func planOnly(_ id: String, from start: Date = .distantFuture) -> Bool {
+        guard let extra = model.state.account(id)?.usage?.extra else { return false }
+        if !extra.enabled { return true }
+        let thisMonth = Calendar.current.dateInterval(of: .month, for: model.now)?.start ?? model.now
+        return (extra.usedCents ?? 0) == 0 && start >= thisMonth
     }
 
     private func planLine(_ account: Account, _ total: UsageTotal, _ r: UsageReport) -> String {
         let value = String(localized: "\(dollars(total.cost)) API value")
-        if planOnly(account.id) { return value + " · " + String(localized: "all from the plan") }
+        if planOnly(account.id, from: range.dates.lowerBound) { return value + " · " + String(localized: "all from the plan") }
         guard r.extraSince[account.id] != nil else { return value }
         return value + " · " + String(localized: "\(dollars(total.planCost)) from the plan · \(dollars(total.extraCost)) as extra usage")
     }

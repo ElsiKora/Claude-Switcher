@@ -77,6 +77,8 @@ final class AppModel {
     /// account gets its Claude Code settings.
     private var addingFrom: Account?
     private var backoff: [String: Date] = [:]
+    /// When each account's profile was last read; names and plans change on claude.ai.
+    private var profileRead: [String: Date] = [:]
     private var strikes: [String: Int] = [:]
     private var loop: Task<Void, Never>?
     /// The refresh under way; the loop, the window and the menu panel all
@@ -295,7 +297,19 @@ final class AppModel {
                     let account = Account(profile: profile)
                     state.accounts.append(account)
                     added = account
+                    profileRead[job.id] = now
                     record(String(localized: "Added \(account.displayName)."))
+                } else if profileRead[job.id].map({ now.timeIntervalSince($0) > 30 * 60 }) ?? true {
+                    // The name Claude calls you, the email and the plan follow claude.ai.
+                    profileRead[job.id] = now
+                    let profile = try await api.profile(token: token)
+                    if let old = state.account(job.id),
+                       old.name != profile.name || old.email != profile.email || old.plan != profile.plan {
+                        state.update(job.id) { $0.name = profile.name; $0.email = profile.email; $0.plan = profile.plan }
+                        if old.name != profile.name, let renamed = state.account(job.id) {
+                            record(String(localized: "\(old.displayName) is now called \(renamed.displayName), as on claude.ai."))
+                        }
+                    }
                 }
                 let usage = try await api.usage(token: token)
                 let before = state.account(job.id)?.usage
