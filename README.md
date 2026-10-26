@@ -20,8 +20,8 @@
 
 - 🔁 One click switches Claude to another account. The app quits Claude cleanly, swaps the saved sign-in and opens Claude again.
 - 🧵 Chats, projects and Claude Code sessions are the same in every account. Work that a switch cuts off continues by itself after the restart.
-- 📊 Both limits of every account live in the menu bar, and Claude Switcher can switch for you when one runs low.
-- 💸 Analytics shows what your Claude Code usage would cost at API prices, by day, model, account and chat.
+- 📊 Both limits of every account live in the menu bar with when they run out at your pace, and Claude Switcher can switch for you before they do, as rarely as it can.
+- 💸 Analytics shows what your Claude Code usage would cost at API prices, what your plans covered and what extra usage paid for, by day, model, account and chat.
 
 <p align="center">
   <img src="docs/assets/menu-bar.png" width="340" alt="The menu bar panel">
@@ -77,22 +77,28 @@ It runs in the menu bar, reads each account's 5-hour and weekly limits from Anth
 
 - ✨ **One-click switch**: quits Claude cleanly (the same shutdown as quitting it yourself), swaps the sign-in and opens Claude again.
 - ✨ **Add Account**: restarts Claude on its sign-in screen and keeps your current sign-in. Sign in with the other account and Claude Switcher picks it up.
+- ✨ **Adding several accounts**: a switch that keeps cut-off chats waiting while you add accounts one after another. Turn it off on the last one and every waiting chat continues there.
 - ✨ **Shared chats and projects**: every account's Claude Code chat list holds the same chats. Chats you deleted stay deleted.
 - ✨ **Work continues after a switch**: chats that were mid-turn, running a command, or waiting on a background agent are marked as interrupted. Claude continues the main chats, and they check on their side sessions.
-- ✨ **Live limits**: both limits of every account, as rings in the menu bar and the window, with their reset times.
-- ✨ **Automatic switching** (optional):
-  - switch when the active account is nearly full (90–98%);
-  - or move to an account whose week resets within a day while it has at least half its week left.
+- ✨ **Live limits**: both limits of every account, as rings in the menu bar and the window, with their reset times and when they run out at the pace of the last checks.
+- ✨ **Automatic switching** (optional), built to switch rarely, since every switch makes each open chat read its context again in the new account:
+  - before the limit runs out at the current pace, or at your threshold at the latest; earlier on an account with extra usage on;
+  - to the account whose free room would reset unused first, never to one that is already billing extra usage;
+  - at a pause between replies when there is still room, waiting three minutes at most;
+  - to an account whose week resets within a day, only when that week is worth clearly more than the switch costs;
+  - paused for two hours with one click.
 - ✨ **Same setup everywhere**: compares each account's connectors, tool permissions, plugins and skills on claude.ai with a reference account. Copy Setup adds what is missing, and only runs when you click it.
+- ✨ **Connect connectors in place**: Connect… opens claude.ai's Connectors page inside Claude Switcher as that account, whichever account Claude is using.
 - ✨ **Claude Code settings in sync**: session presets, folder permissions and sidebar sections follow you from one account to the next.
-- ✨ **Analytics**: tokens, replies, cache hits and API-price value, with these breakdowns:
-  - by day, model, account and chat;
-  - Today, 7 days, 30 days or all time;
-  - plus what claude.ai billed beyond each plan this month, in that account's currency.
+- ✨ **Analytics**: tokens, replies, cache hits and API-price value:
+  - filtered by account and model, for today, 7 or 30 days, this month or all time;
+  - a breakdown table by day, account, model or chat, sortable by every column;
+  - what each plan covered and what extra usage paid for, and what claude.ai billed beyond each plan by day, in that account's currency.
 - ✨ **Chats**: one table of every Claude Code chat across accounts. It shows status, project, model, tokens and API value, and opens a chat in Claude with a double click.
 - ✨ **Shortcuts and Siri**: *Switch Claude Account*, *Switch to the Account with the Most Room* and *Get Claude Usage*.
-- ✨ **Notifications**: when a limit resets, or an account passes 90%, with a Switch button.
-- ✨ **Start at login** and an optional daily update check against this repository's releases.
+- ✨ **Notifications**: when a limit resets, an account passes 90%, extra usage billed today passes an amount you set, or an account is billing with nowhere to move; and a morning summary of the day before.
+- ✨ **A regular Mac app**: Dock icon, a window that stays, the menu bar panel, Settings… (⌘,) and Check for Updates… in the app menu.
+- ✨ **Names follow claude.ai**: a new name, email or plan shows up within half an hour.
 - ✨ **Safety backup**: before the first switch, Claude's chat lists, projects and the files a switch touches are copied. Every switch also keeps a backup of the files it changes.
 
 ## 📸 Screenshots
@@ -241,8 +247,18 @@ Click an account in the menu bar panel or in the window. The HUD shows each step
 
 In **Settings → Automatic Switching** you can turn on:
 
-- **Switch when nearly full**: when the active account passes the threshold, Claude Switcher moves to the account with the most room. It only picks an account well below the threshold, and it waits at least 10 minutes between automatic switches.
-- **Use up expiring weeks**: when another account's week resets within a day with half or more left, Claude Switcher moves there once your chats have been idle for 15 minutes and no command is running. A switch by hand pauses this for 5 hours.
+- **Switch when nearly full**: before the active account's limit runs out at the pace of its last checks (or at the threshold you pick, at the latest), Claude Switcher moves to the account whose free room would reset unused first, else the one with the most room. It only picks an account well below the threshold, never one already billing extra usage, and waits at least 10 minutes between automatic switches. When there is still room, it waits for a pause between replies, three minutes at most.
+- **Use up expiring weeks**: when another account's week resets within a day with half or more left, Claude Switcher moves there once your chats have been idle for 15 minutes and no command is running, if that week is worth at least three times re-reading every open chat. A switch by hand pauses this for 5 hours.
+
+**Pause Automatic Switching for 2 Hours** is in the menu bar panel and in Settings.
+
+### Adding Several Accounts
+
+Turn on **Adding several accounts** in the menu bar panel or the window, then add or switch accounts as often as you like: chats a restart cuts off wait instead of continuing, and nothing switches on its own. Turn it off on the account the chats should continue in; Claude restarts once and continues them all there.
+
+### Connectors
+
+On an account's page, **Connect…** opens claude.ai's Connectors page inside Claude Switcher, signed in as that account. Sign in to each connector there with its own Connect button.
 
 ### Command Line
 
@@ -259,6 +275,7 @@ Prints every saved account with its usage, then exits.
 - The update check, which you can turn off, reads this repository's latest release from `api.github.com`. Nothing else leaves your Mac: no analytics, no telemetry.
 - Analytics is read from Claude Code's own transcripts in `~/.claude/projects` and stays local.
 - Copy Setup changes an account on claude.ai, so it only runs when you click it and confirm.
+- Connect… copies an account's claude.ai session into a private web view that keeps nothing on disk; its cookies only go to claude.ai, and a connector's own sign-in page sees none of them.
 
 ## 🛣 Roadmap
 
@@ -271,6 +288,7 @@ Prints every saved account with its usage, then exits.
 | Connector, plugin and skill setup from a reference      | ✅ Done        |
 | Analytics and the all-chats table                       | ✅ Done        |
 | Shortcuts, notifications, start at login                | ✅ Done        |
+| Forecast-driven switching, pause, plan vs extra usage   | ✅ Done        |
 | Desktop and Notification Center widgets                 | 🚧 In Progress |
 | Signed and notarized releases                           | 🚧 In Progress |
 
