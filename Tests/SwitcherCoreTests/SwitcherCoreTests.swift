@@ -583,6 +583,12 @@ private func write(_ text: String, _ url: URL) throws {
         #expect(lead.raw("interruptedAwaitingPerson") == Data("false".utf8))
         let side = try JSONObjectText(contentsOf: desktop.sessionsRoot.appending(path: "A/O/local_side1.json"))
         #expect(!side.contains("interruptedByQuitAt"))
+
+        // They wait to continue until Claude takes the mark off; a mark more than a day old is left alone.
+        #expect(CutOffTurns.waiting(desktop: desktop, account: "A", org: "O", now: now).map(\.id) == ["limited", "solo", "lead", "side2"])
+        try write(#"{"cliSessionId": "solo", "title": "Tsolo", "lastActivityAt": 9}"#, desktop.sessionsRoot.appending(path: "A/O/local_solo.json"))
+        #expect(CutOffTurns.waiting(desktop: desktop, account: "A", org: "O", among: ["solo", "lead"], now: now).map(\.id) == ["lead"])
+        #expect(CutOffTurns.waiting(desktop: desktop, account: "A", org: "O", now: now.addingTimeInterval(2 * 86400)).isEmpty)
     }
 }
 

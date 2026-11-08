@@ -3,8 +3,9 @@ public import Foundation
 /// After a quit, decides which chats Claude should continue and marks them
 /// the way Claude itself marks chats on a clean quit. Claude then sends each
 /// marked chat "The app was quit while you were working. Please continue
-/// from where you left off." when it starts again (four right away, the
-/// others when they are opened).
+/// from where you left off." when it starts again: up to four right away,
+/// fewer when its Claude Code processes are near their limit or a start
+/// fails, and the others when they are opened (see `waiting`).
 ///
 /// A chat was cut off when its Claude Code process ran at the quit and
 /// either its last turn still waited on the model or a tool, however long
@@ -140,6 +141,28 @@ public enum CutOffTurns {
             marked.append((last, Chat(id: id, title: object.string("title") ?? "", sideSessions: 0)))
         }
         return marked.sorted { $0.0 > $1.0 }.map(\.1)
+    }
+
+    /// Chats of `account/org` that still wait to continue: their entry keeps
+    /// the mark of a quit within `window`, and they are not archived. Claude
+    /// takes the mark off a chat once it continues it. With `among`, only
+    /// those chats (ids without `local_`) are read. Most recently active first.
+    public static func waiting(desktop: ClaudeDesktop, account: String, org: String,
+                               among ids: [String]? = nil, now: Date = .now) -> [Chat] {
+        let dir = desktop.sessionsRoot.appending(path: account).appending(path: org)
+        let names = ids.map { $0.map { "local_\($0).json" } }
+            ?? ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasPrefix("local_") && $0.hasSuffix(".json") }
+        let since = (now.timeIntervalSince1970 - window) * 1000
+        var waiting: [(Int64, Chat)] = []
+        for name in names {
+            guard let object = try? JSONObjectText(contentsOf: dir.appending(path: name)),
+                  let at = object.raw("interruptedByQuitAt").flatMap({ Double(String(decoding: $0, as: UTF8.self)) }), at >= since,
+                  object.raw("isArchived").map({ String(decoding: $0, as: UTF8.self) }) != "true" else { continue }
+            let last = object.raw("lastActivityAt").flatMap { Int64(String(decoding: $0, as: UTF8.self)) } ?? 0
+            let id = String(name.dropFirst("local_".count).dropLast(".json".count))
+            waiting.append((last, Chat(id: id, title: object.string("title") ?? "", sideSessions: 0)))
+        }
+        return waiting.sorted { $0.0 > $1.0 }.map(\.1)
     }
 
     /// `armedWorkAtQuit`: `{at, cronCount, durableCronCount, backgroundTaskCount}`.

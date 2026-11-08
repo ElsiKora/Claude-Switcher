@@ -87,6 +87,8 @@ final class AppModel {
     /// The refresh under way; the loop, the window and the menu panel all
     /// ask for one, and they share it.
     private var refreshing: Task<Void, Never>?
+    /// Opening the chats a restart cut off that Claude left for later.
+    private var resuming: Task<Void, Never>?
 
     /// Sample accounts and no access to Claude, for screenshots of the design.
     let isDemo: Bool
@@ -644,7 +646,7 @@ final class AppModel {
             if finishing { self?.record(String(localized: "Done adding accounts on its own: the active account was nearly full.")) }
             self?.record(Self.describe(switchTo: name, cause: cause, report: report))
             self?.cutOff = report.cutOff
-            self?.continueRest(report.cutOff)
+            self?.continueRest(account: target.account.id, org: target.orgID)
         }
         let ok: Bool
         if target.account.id == active {
@@ -721,7 +723,7 @@ final class AppModel {
             guard let self else { return }
             self.record(String(localized: "Brought \(report.chats) chats and \(report.projects) projects into \(account.displayName)."))
             // Chats Add Account cut off continue in the new account.
-            self.continueRest(self.cutOff)
+            self.continueRest(account: account.id, org: account.org)
         }
     }
 
@@ -832,18 +834,50 @@ final class AppModel {
         quitPromptAllowed = QuitPrompt.isAllowed
     }
 
-    /// Claude continues the four most recent marked chats on its own and the
-    /// rest when they are opened, so the rest are opened one by one.
-    private func continueRest(_ chats: [CutOffTurns.Chat]) {
+    /// Claude continues some marked chats on its own when it starts: up to
+    /// four, fewer when its Claude Code processes are near their limit or a
+    /// start fails. The rest wait until they are opened. So once Claude's own
+    /// pass is over, each chat still marked in the workspace Claude started
+    /// in is opened, one at a time, the next only once the last one has
+    /// started. Claude's own marks count too, not only the switcher's.
+    private func continueRest(account id: String, org: String) {
+        resuming?.cancel()
         guard !state.holdChats else { return }
-        let rest = Array(chats.dropFirst(4))
-        guard !rest.isEmpty else { return }
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(25))
-            for chat in rest {
-                guard let self, ClaudeProcess.isRunning else { return }
+        let desktop = engine.desktop
+        resuming = Task { [weak self] in
+            @Sendable func waiting(_ among: [String]? = nil) async -> [CutOffTurns.Chat] {
+                await Task.detached { CutOffTurns.waiting(desktop: desktop, account: id, org: org, among: among) }.value
+            }
+            // Claude's own pass is over once no chat has started for 15 seconds, or after two minutes.
+            try? await Task.sleep(for: .seconds(20))
+            var left = await waiting().map(\.id)
+            var quiet = 0, waited = 0
+            while quiet < 15, waited < 120 {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled, ClaudeProcess.isRunning else { return }
+                let now = await waiting(left).map(\.id)
+                quiet = now == left ? quiet + 3 : 0
+                waited += 3
+                left = now
+            }
+            var opened = 0, stuck = 0
+            for chat in await waiting(left) {
+                guard let self, !Task.isCancelled, ClaudeProcess.isRunning, !self.isBusy else { return }
                 self.open(chat)
-                try? await Task.sleep(for: .seconds(6))
+                var started = false
+                for _ in 0..<15 where !started {
+                    try? await Task.sleep(for: .seconds(2))
+                    started = await waiting([chat.id]).isEmpty
+                }
+                if started { opened += 1 } else { stuck += 1 }
+                // Two that do not start: Claude has no room for more right now.
+                if stuck == 2 { break }
+            }
+            guard let self, !Task.isCancelled else { return }
+            if opened > 0 { self.record(String(localized: "Opened \(opened) chats Claude had left for later; they continue now.")) }
+            let still = await waiting(left)
+            if !still.isEmpty {
+                self.record(String(localized: "\(still.count) chats still wait to continue: \(still.map(\.title).joined(separator: ", ")). Open them in Claude."))
             }
         }
     }
@@ -867,7 +901,7 @@ final class AppModel {
             guard let self else { return }
             self.cutOff = report.cutOff
             self.record(String(localized: "Done adding accounts: \(report.cutOff.count) waiting chats continue in \(self.activeAccount?.displayName ?? "")."))
-            self.continueRest(report.cutOff)
+            if let active = self.activeAccount { self.continueRest(account: active.id, org: active.org) }
         }
         if ok {
             state.heldChats = []
