@@ -13,6 +13,7 @@ public struct Store: Sendable {
     public var stateURL: URL { root.appending(path: "state.json") }
     public var backupsRoot: URL { root.appending(path: "backups", directoryHint: .isDirectory) }
     public var spacesSeenURL: URL { root.appending(path: "spaces-seen.json") }
+    public var chatsSeenURL: URL { root.appending(path: "chats-seen.json") }
     public var scheduledSeenURL: URL { root.appending(path: "scheduled-tasks-seen.json") }
     public var safetyBackupRoot: URL { root.appending(path: "safety-backup", directoryHint: .isDirectory) }
 
@@ -181,7 +182,8 @@ public struct SwitchEngine: Sendable {
         if let source {
             report.settingsMirrored = try SettingsMirror.mirror(in: desktop, from: source, to: account)
         }
-        report.chats = try ChatSync.sessions(root: desktop.sessionsRoot, account: account.id, org: account.org)
+        report.chats = try ChatSync.sessions(
+            root: desktop.sessionsRoot, account: account.id, org: account.org, seenURL: store.chatsSeenURL)
         // A failure here only costs the grouping into projects.
         do {
             report.projects = try ChatSync.spaces(

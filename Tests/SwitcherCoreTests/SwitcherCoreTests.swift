@@ -107,6 +107,11 @@ private func write(_ text: String, _ url: URL) throws {
 }
 
 @Suite struct ChatSyncTests {
+    /// A sync into `account/org`, which keeps what it saw beside the lists.
+    private func sync(_ root: URL, into account: String, _ org: String) throws -> Int {
+        try ChatSync.sessions(root: root, account: account, org: org, seenURL: root.appending(path: "chats-seen.json"))
+    }
+
     @Test func copiesMissingRefreshesOlderSkipsDeleted() throws {
         let root = try tempDir()
         try write(#"{"lastActivityAt": 5, "title": "new"}"#, root.appending(path: "a/o1/local_1.json"))
@@ -117,7 +122,7 @@ private func write(_ text: String, _ url: URL) throws {
         try write(#"{"lastActivityAt": 10}"#, root.appending(path: "b/o2/local_2.json"))
         try write(#"{"lastActivityAt": 1}"#, root.appending(path: "b/o2/local_4.json"))
 
-        let n = try ChatSync.sessions(root: root, account: "b", org: "o2")
+        let n = try sync(root, into: "b", "o2")
         #expect(n == 1)
         let target = root.appending(path: "b/o2")
         #expect(try String(contentsOf: target.appending(path: "local_1.json"), encoding: .utf8).contains("new"))
@@ -158,13 +163,13 @@ private func write(_ text: String, _ url: URL) throws {
         try setModified(target.appending(path: "local_2.json"), before)
         try write(#"{"v":1,"archived":["local_2","local_9"]}"#, target.appending(path: "archived-sessions.idx"))
 
-        #expect(try ChatSync.sessions(root: root, account: "b", org: "o2") == 2)
+        #expect(try sync(root, into: "b", "o2") == 2)
         #expect(try JSONObjectText(contentsOf: target.appending(path: "local_1.json")).raw("isArchived") == Data("true".utf8))
         #expect(try JSONObjectText(contentsOf: target.appending(path: "local_2.json")).raw("isArchived") == Data("false".utf8))
         #expect(try archivedIDs(in: target) == ["local_9", "local_1"])
         // The copies keep the date of the change, so nothing travels twice.
         #expect(try modified(target.appending(path: "local_1.json")) == later)
-        #expect(try ChatSync.sessions(root: root, account: "b", org: "o2") == 0)
+        #expect(try sync(root, into: "b", "o2") == 0)
     }
 
     /// Of all the copies of a missing chat, the one with the newest activity
@@ -190,7 +195,7 @@ private func write(_ text: String, _ url: URL) throws {
         try entry(#"{"lastActivityAt": 5, "isArchived": true}"#, "a/o1/local_4.json", later)
         try write("", root.appending(path: "c/o3/deleted_4"))
 
-        #expect(try ChatSync.sessions(root: root, account: "b", org: "o2") == 3)
+        #expect(try sync(root, into: "b", "o2") == 3)
         let target = root.appending(path: "b/o2")
         func isArchived(_ name: String) throws -> Bool {
             try JSONObjectText(contentsOf: target.appending(path: name)).raw("isArchived") == Data("true".utf8)
@@ -209,8 +214,96 @@ private func write(_ text: String, _ url: URL) throws {
         let root = try tempDir()
         try write(#"{"lastActivityAt": 5, "isArchived": true}"#, root.appending(path: "a/o1/local_1.json"))
         try write("not json", root.appending(path: "b/o2/archived-sessions.idx"))
-        #expect(try ChatSync.sessions(root: root, account: "b", org: "o2") == 1)
+        #expect(try sync(root, into: "b", "o2") == 1)
         #expect(try String(contentsOf: root.appending(path: "b/o2/archived-sessions.idx"), encoding: .utf8) == "not json")
+    }
+
+    /// Switched to another account in Claude itself, no sync brings its list
+    /// up to date, and Claude rewrites the stale copies there when they are
+    /// opened, later than the person's changes elsewhere. Those changes still
+    /// win: archived, unarchived and renamed chats stay that way everywhere.
+    @Test func copiesClaudeOnlyRewroteKeepTheDateOfTheirLastChange() throws {
+        let root = try tempDir()
+        let synced = Date(timeIntervalSince1970: 1_800_000_000)
+        let changed = synced.addingTimeInterval(600)
+        let rewritten = synced.addingTimeInterval(1200)
+        func entry(_ path: String, archived: Bool, title: String, _ more: String = "", at date: Date) throws {
+            try write(#"{"lastActivityAt": 5, "isArchived": \#(archived), "title": "\#(title)"\#(more)}"#, root.appending(path: path))
+            try setModified(root.appending(path: path), date)
+        }
+        func isArchived(_ path: String) throws -> Bool {
+            try JSONObjectText(contentsOf: root.appending(path: path)).raw("isArchived") == Data("true".utf8)
+        }
+        func title(_ path: String) throws -> String? {
+            try JSONObjectText(contentsOf: root.appending(path: path)).string("title")
+        }
+        // Chats 1 and 2 are open and 3 is archived in every list when the switcher syncs.
+        for list in ["a/o1", "b/o2", "c/o3"] {
+            try entry("\(list)/local_1.json", archived: false, title: "One", at: synced)
+            try entry("\(list)/local_2.json", archived: false, title: "Two", at: synced)
+            try entry("\(list)/local_3.json", archived: true, title: "Three", at: synced)
+        }
+        #expect(try sync(root, into: "a", "o1") == 0)
+        // In a, chat 1 is archived, 2 renamed and 3 unarchived.
+        try entry("a/o1/local_1.json", archived: true, title: "One", at: changed)
+        try entry("a/o1/local_2.json", archived: false, title: "Two, renamed", at: changed)
+        try entry("a/o1/local_3.json", archived: false, title: "Three", at: changed)
+        // Then Claude is switched to b in Claude itself and rewrites b's stale copies.
+        try entry("b/o2/local_1.json", archived: false, title: "One", #", "lastFocusedAt": 9"#, at: rewritten)
+        try entry("b/o2/local_2.json", archived: false, title: "Two", #", "peerReceipts": {}"#, at: rewritten)
+        try entry("b/o2/local_3.json", archived: true, title: "Three", #", "lastFocusedAt": 9"#, at: rewritten)
+
+        // The next switch, into c, brings a's changes, not b's rewritten copies.
+        #expect(try sync(root, into: "c", "o3") == 3)
+        #expect(try isArchived("c/o3/local_1.json"))
+        #expect(try title("c/o3/local_2.json") == "Two, renamed")
+        #expect(try !isArchived("c/o3/local_3.json"))
+        #expect(try archivedIDs(in: root.appending(path: "c/o3")) == ["local_1"])
+        // b gets them too, and nothing goes back to a.
+        #expect(try sync(root, into: "b", "o2") == 3)
+        #expect(try isArchived("b/o2/local_1.json"))
+        #expect(try title("b/o2/local_2.json") == "Two, renamed")
+        #expect(try !isArchived("b/o2/local_3.json"))
+        #expect(try sync(root, into: "a", "o1") == 0)
+        // The copies carry the date of the change, not of Claude's rewrite.
+        #expect(try modified(root.appending(path: "b/o2/local_1.json")) == changed)
+    }
+
+    /// What the person changes in an account switched to in Claude itself
+    /// counts like any change, also when Claude later rewrites the stale copy
+    /// of the account switched back to.
+    @Test func aChangeInAListNoSyncBroughtUpToDateTravels() throws {
+        let root = try tempDir()
+        let synced = Date(timeIntervalSince1970: 1_800_000_000)
+        func entry(_ text: String, _ path: String, _ date: Date) throws {
+            try write(text, root.appending(path: path))
+            try setModified(root.appending(path: path), date)
+        }
+        try entry(#"{"lastActivityAt": 5, "isArchived": false, "title": "One"}"#, "a/o1/local_1.json", synced)
+        try entry(#"{"lastActivityAt": 5, "isArchived": false, "title": "One"}"#, "b/o2/local_1.json", synced)
+        #expect(try sync(root, into: "a", "o1") == 0)
+        // Archived in b, then Claude is switched back to a and opens the chat there.
+        try entry(#"{"lastActivityAt": 5, "isArchived": true, "title": "One"}"#, "b/o2/local_1.json", synced.addingTimeInterval(600))
+        try entry(#"{"lastActivityAt": 5, "isArchived": false, "title": "One", "lastFocusedAt": 9}"#, "a/o1/local_1.json", synced.addingTimeInterval(1200))
+
+        #expect(try sync(root, into: "a", "o1") == 1)
+        #expect(try JSONObjectText(contentsOf: root.appending(path: "a/o1/local_1.json")).raw("isArchived") == Data("true".utf8))
+        #expect(try archivedIDs(in: root.appending(path: "a/o1")) == ["local_1"])
+    }
+
+    /// A record that cannot be read counts as none: copies count from their
+    /// file dates, and the sync writes a new record.
+    @Test func anUnreadableRecordCountsAsNone() throws {
+        let root = try tempDir()
+        try write("not json", root.appending(path: "chats-seen.json"))
+        try write(#"{"lastActivityAt": 5, "isArchived": true}"#, root.appending(path: "a/o1/local_1.json"))
+        try setModified(root.appending(path: "a/o1/local_1.json"), Date(timeIntervalSince1970: 1_800_000_600))
+        try write(#"{"lastActivityAt": 5, "isArchived": false}"#, root.appending(path: "b/o2/local_1.json"))
+        try setModified(root.appending(path: "b/o2/local_1.json"), Date(timeIntervalSince1970: 1_800_000_000))
+
+        #expect(try sync(root, into: "b", "o2") == 1)
+        let record = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appending(path: "chats-seen.json"))) as? [String: Any]
+        #expect((record?["lists"] as? [String: Any])?.keys.sorted() == ["a/o1", "b/o2"])
     }
 
     @Test func scheduledTasksFollowTheSwitchAndStayDeleted() throws {
@@ -238,7 +331,7 @@ private func write(_ text: String, _ url: URL) throws {
         // The target's copy is as new as the source, but has no marker.
         try write(#"{"lastActivityAt": 5, "remoteMcpServersConfig": []}"#, root.appending(path: "b/o2/local_1.json"))
 
-        #expect(try ChatSync.sessions(root: root, account: "b", org: "o2") == 1)
+        #expect(try sync(root, into: "b", "o2") == 1)
         let moved = try JSONObjectText(contentsOf: root.appending(path: "b/o2/local_1.json"))
         #expect(moved.raw("interruptedByQuitAt") == Data("99".utf8))
         #expect(moved.raw("remoteMcpServersConfig") == Data("[]".utf8))
@@ -247,7 +340,7 @@ private func write(_ text: String, _ url: URL) throws {
         #expect(!left.contains("interruptedAwaitingPerson"))
         #expect(left.raw("lastActivityAt") == Data("5".utf8))
         // Nothing left to move the second time.
-        #expect(try ChatSync.sessions(root: root, account: "b", org: "o2") == 0)
+        #expect(try sync(root, into: "b", "o2") == 0)
     }
 
     @Test func projectsLeaveOutOtherOrgLinksAndStayDeleted() throws {
