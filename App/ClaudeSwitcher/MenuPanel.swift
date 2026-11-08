@@ -478,8 +478,16 @@ struct Notices: View {
 struct WorkspaceBadge: View {
     let org: Org
 
+    private var symbol: String {
+        switch org.kind {
+        case .personal: "person.fill"
+        case .team: "person.3.fill"
+        case .enterprise: "building.2.fill"
+        }
+    }
+
     var body: some View {
-        Label(org.label, systemImage: org.kind == .personal ? "person.fill" : "person.3.fill")
+        Label(org.label, systemImage: symbol)
             .labelStyle(.titleAndIcon)
             .font(.system(size: 10, weight: .semibold))
             .lineLimit(1)

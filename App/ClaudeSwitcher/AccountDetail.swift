@@ -23,6 +23,14 @@ struct AccountDetail: View {
                         SettingsIcon(systemName: "nosign", color: .orange)
                     }
                 }
+                if (account.orgs?.count ?? 0) <= 1 && model.state.excludeEnterprise && account.isEnterprise {
+                    Label {
+                        Text("Not in rotation")
+                        Text("Enterprise accounts are left out of automatic switching in Settings. Switch to this one by hand when you want to use it.")
+                    } icon: {
+                        SettingsIcon(systemName: "building.2.fill", color: .teal)
+                    }
+                }
             }
             Notices()
 
@@ -345,10 +353,18 @@ struct WorkspacesSection: View {
             ForEach(model.state.seats.filter { $0.account.id == account.id }) { seat in
                 if let org = seat.org {
                     row(seat, org)
+                    let leftOutAsEnterprise = model.state.excludeEnterprise && org.kind == .enterprise
                     Toggle(isOn: Binding(get: { !seat.excluded }, set: { model.setExcluded(seat, !$0) })) {
-                        Text("Use for automatic switching")
-                            .foregroundStyle(.secondary)
+                        Group {
+                            if leftOutAsEnterprise {
+                                Text("Left out with every Enterprise workspace in Settings")
+                            } else {
+                                Text("Use for automatic switching")
+                            }
+                        }
+                        .foregroundStyle(.secondary)
                     }
+                    .disabled(leftOutAsEnterprise)
                     .padding(.leading, 34)
                 }
             }
@@ -363,6 +379,11 @@ struct WorkspacesSection: View {
         let u = seat.usage?.current(at: model.now)
         let isOpen = seat.orgID == account.org
         let signedIn = account.id == model.active
+        let kind = switch org.kind {
+        case .personal: ""
+        case .team: " · " + String(localized: "Team")
+        case .enterprise: " · " + String(localized: "Enterprise")
+        }
         return LabeledContent {
             HStack(spacing: 8) {
                 if isOpen {
@@ -375,9 +396,13 @@ struct WorkspacesSection: View {
         } label: {
             Label {
                 Text(org.kind == .personal ? String(localized: "Personal") : org.name)
-                Text(seat.problem ?? String(localized: "5-hour \(percentText(u?.session)) · Week \(percentText(u?.weekly))\(org.kind == .personal ? "" : " · " + String(localized: "Team"))"))
+                Text(seat.problem ?? String(localized: "5-hour \(percentText(u?.session)) · Week \(percentText(u?.weekly))\(kind)"))
             } icon: {
-                SettingsIcon(systemName: org.kind == .personal ? "person.fill" : "person.3.fill", color: org.kind == .personal ? .blue : .indigo)
+                switch org.kind {
+                case .personal: SettingsIcon(systemName: "person.fill", color: .blue)
+                case .team: SettingsIcon(systemName: "person.3.fill", color: .indigo)
+                case .enterprise: SettingsIcon(systemName: "building.2.fill", color: .teal)
+                }
             }
         }
     }

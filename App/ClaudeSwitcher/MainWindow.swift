@@ -121,8 +121,16 @@ struct AccountRow: View {
         HStack(spacing: 8) {
             AccountRings(account: account, size: 30)
             VStack(alignment: .leading, spacing: 1) {
-                Text(account.displayName)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(account.displayName)
+                        .lineLimit(1)
+                    if model.state.leftOut(account) {
+                        Image(systemName: "hand.raised.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .help("Left out of automatic switching")
+                    }
+                }
                 Text(rowSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)

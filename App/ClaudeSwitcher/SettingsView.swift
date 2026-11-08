@@ -119,6 +119,14 @@ struct SettingsView: View {
                         SettingsIcon(systemName: "calendar.badge.clock", color: .purple)
                     }
                 }
+                Toggle(isOn: Binding(get: { model.state.excludeEnterprise }, set: { model.setExcludeEnterprise($0) })) {
+                    Label {
+                        Text("Leave out Enterprise accounts")
+                        Text("Enterprise accounts and workspaces stay in the list and switch by hand, but automatic switching and the account with the most room never move to them.")
+                    } icon: {
+                        SettingsIcon(systemName: "building.2.fill", color: .teal)
+                    }
+                }
                 if model.state.autoSwitch || model.state.spendWeekly {
                     LabeledContent {
                         if model.isPaused {
@@ -140,7 +148,7 @@ struct SettingsView: View {
             } header: {
                 Text("Automatic Switching")
             } footer: {
-                Text("Every switch restarts Claude, and each open chat reads its context again in the new account, so the switcher moves as rarely as it can. With extra usage on, it moves earlier, since running out costs money, and never to an account that is already billing. Both are off until you turn them on.")
+                Text("Every switch restarts Claude, and each open chat reads its context again in the new account, so the switcher moves as rarely as it can. With extra usage on, it moves earlier, since running out costs money, and never to an account that is already billing. All three are off until you turn them on.")
             }
 
             Section {

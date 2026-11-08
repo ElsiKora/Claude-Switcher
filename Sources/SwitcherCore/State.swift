@@ -28,6 +28,9 @@ public struct Account: Codable, Sendable, Identifiable, Equatable {
     /// Whether the account has a plan Claude Code runs on (Pro, Max, Team,
     /// Enterprise). One without (the free plan) is shown, never rotated to.
     public var runsClaudeCode: Bool { !plan.isEmpty || (orgs?.count ?? 0) > 1 }
+
+    /// Whether the account's plan is Enterprise.
+    public var isEnterprise: Bool { plan.caseInsensitiveCompare("enterprise") == .orderedSame }
 }
 
 /// A workspace of an account on claude.ai, with limits of its own.
@@ -70,10 +73,15 @@ public struct Seat: Identifiable, Sendable, Equatable {
     public var org: Org?
     public var usage: Usage?
     public var problem: String?
+    /// Left out of automatic switching: by hand, or as an Enterprise seat
+    /// while Enterprise accounts are left out.
     public var excluded: Bool
 
     /// Workspaces listed in `orgs` all have a Claude Code plan.
     public var runsClaudeCode: Bool { org != nil || account.runsClaudeCode }
+
+    /// An Enterprise workspace, or an Enterprise account with one workspace.
+    public var isEnterprise: Bool { org.map { $0.kind == .enterprise } ?? account.isEnterprise }
 
     /// "<account>/<org>": limits belong to an account in a workspace.
     public var id: String { Self.key(account.id, orgID) }
@@ -108,10 +116,18 @@ extension SwitcherState {
     public var seats: [Seat] {
         accounts.flatMap { a -> [Seat] in
             guard let orgs = a.orgs, orgs.count > 1 else {
-                return [Seat(account: a, orgID: a.org, org: nil, usage: a.usage, problem: a.problem, excluded: false)]
+                return [Seat(account: a, orgID: a.org, org: nil, usage: a.usage, problem: a.problem,
+                             excluded: excludeEnterprise && a.isEnterprise)]
             }
-            return orgs.map { Seat(account: a, orgID: $0.id, org: $0, usage: $0.usage, problem: $0.problem ?? a.problem, excluded: $0.excluded) }
+            return orgs.map { Seat(account: a, orgID: $0.id, org: $0, usage: $0.usage, problem: $0.problem ?? a.problem,
+                                   excluded: $0.excluded || (excludeEnterprise && $0.kind == .enterprise)) }
         }
+    }
+
+    /// Whether automatic switching leaves the whole account out: every one of its workspaces.
+    public func leftOut(_ account: Account) -> Bool {
+        let own = seats.filter { $0.account.id == account.id }
+        return !own.isEmpty && own.allSatisfy(\.excluded)
     }
 
     public func seat(_ id: String?) -> Seat? {
@@ -135,6 +151,9 @@ public struct SwitcherState: Codable, Sendable, Equatable {
     public var threshold: Double = Policy.defaultThreshold
     /// Moves to an account whose week is about to reset mostly unused.
     public var spendWeekly = false
+    /// Enterprise accounts and workspaces stay switchable by hand, but
+    /// automatic switching and the most-room pick never move to them.
+    public var excludeEnterprise = false
     public var lastSwitch: Date?
     public var handSwitch: Date?
     public var lastCause: SwitchCause?
@@ -198,6 +217,7 @@ public struct SwitcherState: Codable, Sendable, Equatable {
         autoSwitch = try c.decodeIfPresent(Bool.self, forKey: .autoSwitch) ?? d.autoSwitch
         threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? d.threshold
         spendWeekly = try c.decodeIfPresent(Bool.self, forKey: .spendWeekly) ?? d.spendWeekly
+        excludeEnterprise = try c.decodeIfPresent(Bool.self, forKey: .excludeEnterprise) ?? d.excludeEnterprise
         lastSwitch = try c.decodeIfPresent(Date.self, forKey: .lastSwitch)
         handSwitch = try c.decodeIfPresent(Date.self, forKey: .handSwitch)
         lastCause = try c.decodeIfPresent(SwitchCause.self, forKey: .lastCause)

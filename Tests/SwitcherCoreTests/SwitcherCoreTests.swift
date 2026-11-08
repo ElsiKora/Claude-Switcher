@@ -269,6 +269,13 @@ private func write(_ text: String, _ url: URL) throws {
         // A free account is never rotated to.
         st.accounts[1].plan = ""
         #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, now: now))?.0.account.id == "C")
+        // An Enterprise account is left out only when asked.
+        st.accounts[1].plan = "Enterprise"
+        #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, now: now))?.0.account.id == "B")
+        st.excludeEnterprise = true
+        #expect(Policy.autoTarget(st, active: "A/o", context: .init(claudeRunning: true, now: now))?.0.account.id == "C")
+        #expect(st.leftOut(st.accounts[1]))
+        st.excludeEnterprise = false
         st.accounts[1].plan = "Max"
         // Paused: nothing moves.
         st.pausedUntil = now.addingTimeInterval(600)
@@ -296,6 +303,16 @@ private func write(_ text: String, _ url: URL) throws {
         #expect(Policy.suggestion(st, active: "A/o", now: now) == nil)
         st.accounts[1].usage?.session = 10
         #expect(Policy.suggestion(st, active: "A/o", now: now)?.account.id == "B")
+        // An Enterprise workspace is left out only when asked; the account's other workspace stays in.
+        var personal = Org(id: "p", name: "B", kind: .personal)
+        personal.usage = Usage(session: 80, sessionReset: nil, weekly: 0, weeklyReset: nil, checkedAt: now)
+        var work = Org(id: "e", name: "Acme", kind: .enterprise)
+        work.usage = Usage(session: 10, sessionReset: nil, weekly: 0, weeklyReset: nil, checkedAt: now)
+        st.accounts[1].orgs = [personal, work]
+        #expect(Policy.suggestion(st, active: "A/o", now: now)?.id == "B/e")
+        st.excludeEnterprise = true
+        #expect(Policy.suggestion(st, active: "A/o", now: now) == nil)
+        #expect(!st.leftOut(st.accounts[1]))
     }
 }
 

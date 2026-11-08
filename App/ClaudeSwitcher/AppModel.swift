@@ -735,6 +735,7 @@ final class AppModel {
 
     func setAutoSwitch(_ on: Bool) { state.autoSwitch = on; save() }
     func setSpendWeekly(_ on: Bool) { state.spendWeekly = on; save() }
+    func setExcludeEnterprise(_ on: Bool) { state.excludeEnterprise = on; save() }
     func setThreshold(_ t: Double) { state.threshold = t; save() }
     func setCheckForUpdates(_ on: Bool) { state.checkForUpdates = on; save() }
     func setPlaySounds(_ on: Bool) { state.playSounds = on; save() }
