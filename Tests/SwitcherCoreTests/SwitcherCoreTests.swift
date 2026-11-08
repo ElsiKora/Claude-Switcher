@@ -126,6 +126,93 @@ private func write(_ text: String, _ url: URL) throws {
         #expect(FileManager.default.fileExists(atPath: target.appending(path: "local_4.json").path))
     }
 
+    private func setModified(_ url: URL, _ date: Date) throws {
+        try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
+    }
+
+    private func modified(_ url: URL) throws -> Date? {
+        try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+    }
+
+    private func archivedIDs(in store: URL) throws -> [String] {
+        let data = try Data(contentsOf: store.appending(path: "archived-sessions.idx"))
+        return (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["archived"] as? [String] ?? []
+    }
+
+    /// Archiving or unarchiving rewrites an entry without new activity: the
+    /// later file change wins, and the target's archived index follows.
+    @Test func archiveStateTravelsAtEqualActivity() throws {
+        let root = try tempDir()
+        let before = Date(timeIntervalSince1970: 1_800_000_000)
+        let later = before.addingTimeInterval(3600)
+        let target = root.appending(path: "b/o2")
+        // Chat 1 was archived in a; b still has it open.
+        try write(#"{"lastActivityAt": 5, "isArchived": true}"#, root.appending(path: "a/o1/local_1.json"))
+        try setModified(root.appending(path: "a/o1/local_1.json"), later)
+        try write(#"{"lastActivityAt": 5, "isArchived": false}"#, target.appending(path: "local_1.json"))
+        try setModified(target.appending(path: "local_1.json"), before)
+        // Chat 2 was unarchived in a; b still has it archived.
+        try write(#"{"lastActivityAt": 7, "isArchived": false}"#, root.appending(path: "a/o1/local_2.json"))
+        try setModified(root.appending(path: "a/o1/local_2.json"), later)
+        try write(#"{"lastActivityAt": 7, "isArchived": true}"#, target.appending(path: "local_2.json"))
+        try setModified(target.appending(path: "local_2.json"), before)
+        try write(#"{"v":1,"archived":["local_2","local_9"]}"#, target.appending(path: "archived-sessions.idx"))
+
+        #expect(try ChatSync.sessions(root: root, account: "b", org: "o2") == 2)
+        #expect(try JSONObjectText(contentsOf: target.appending(path: "local_1.json")).raw("isArchived") == Data("true".utf8))
+        #expect(try JSONObjectText(contentsOf: target.appending(path: "local_2.json")).raw("isArchived") == Data("false".utf8))
+        #expect(try archivedIDs(in: target) == ["local_9", "local_1"])
+        // The copies keep the date of the change, so nothing travels twice.
+        #expect(try modified(target.appending(path: "local_1.json")) == later)
+        #expect(try ChatSync.sessions(root: root, account: "b", org: "o2") == 0)
+    }
+
+    /// Of all the copies of a missing chat, the one with the newest activity
+    /// goes in, then the one changed last; never just the first one found.
+    @Test func aMissingChatTakesTheLatestCopy() throws {
+        let root = try tempDir()
+        let before = Date(timeIntervalSince1970: 1_800_000_000)
+        let later = before.addingTimeInterval(3600)
+        func entry(_ text: String, _ path: String, _ date: Date) throws {
+            try write(text, root.appending(path: path))
+            try setModified(root.appending(path: path), date)
+        }
+        // Archived later in one account and open in the other, both ways
+        // round, so whichever folder is listed first, the archived copy wins.
+        try entry(#"{"lastActivityAt": 5, "isArchived": false}"#, "a/o1/local_1.json", before)
+        try entry(#"{"lastActivityAt": 5, "isArchived": true}"#, "c/o3/local_1.json", later)
+        try entry(#"{"lastActivityAt": 5, "isArchived": true}"#, "a/o1/local_2.json", later)
+        try entry(#"{"lastActivityAt": 5, "isArchived": false}"#, "c/o3/local_2.json", before)
+        // Newer activity wins over a later archive: the chat was worked in since.
+        try entry(#"{"lastActivityAt": 9, "isArchived": false}"#, "a/o1/local_3.json", before)
+        try entry(#"{"lastActivityAt": 5, "isArchived": true}"#, "c/o3/local_3.json", later)
+        // Deleted in one account: it never comes back.
+        try entry(#"{"lastActivityAt": 5, "isArchived": true}"#, "a/o1/local_4.json", later)
+        try write("", root.appending(path: "c/o3/deleted_4"))
+
+        #expect(try ChatSync.sessions(root: root, account: "b", org: "o2") == 3)
+        let target = root.appending(path: "b/o2")
+        func isArchived(_ name: String) throws -> Bool {
+            try JSONObjectText(contentsOf: target.appending(path: name)).raw("isArchived") == Data("true".utf8)
+        }
+        #expect(try isArchived("local_1.json"))
+        #expect(try isArchived("local_2.json"))
+        #expect(try !isArchived("local_3.json"))
+        #expect(try JSONObjectText(contentsOf: target.appending(path: "local_3.json")).raw("lastActivityAt") == Data("9".utf8))
+        #expect(!FileManager.default.fileExists(atPath: target.appending(path: "local_4.json").path))
+        #expect(try Set(archivedIDs(in: target)) == ["local_1", "local_2"])
+        #expect(try modified(target.appending(path: "local_1.json")) == later)
+    }
+
+    /// An archived index Claude could not read either is left alone; the entries still come.
+    @Test func anUnreadableArchivedIndexIsLeftAlone() throws {
+        let root = try tempDir()
+        try write(#"{"lastActivityAt": 5, "isArchived": true}"#, root.appending(path: "a/o1/local_1.json"))
+        try write("not json", root.appending(path: "b/o2/archived-sessions.idx"))
+        #expect(try ChatSync.sessions(root: root, account: "b", org: "o2") == 1)
+        #expect(try String(contentsOf: root.appending(path: "b/o2/archived-sessions.idx"), encoding: .utf8) == "not json")
+    }
+
     @Test func scheduledTasksFollowTheSwitchAndStayDeleted() throws {
         let root = try tempDir()
         let seen = root.appending(path: "seen.json")

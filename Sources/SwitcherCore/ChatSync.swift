@@ -7,13 +7,17 @@ public import Foundation
 /// a chat the user deleted; such chats are never copied back.
 public enum ChatSync {
     /// Copies chat entries of every other account into `account/org`. Adds
-    /// missing chats and refreshes older copies, never deletes. Returns how
-    /// many entries it wrote.
+    /// missing chats and refreshes older copies, never deletes. Of all the
+    /// copies of a chat, the latest one (see `Entry.supersedes`) is the one
+    /// that goes in, and the target's archived index follows its archive
+    /// state. Returns how many entries it wrote.
     @discardableResult
     public static func sessions(root: URL, account: String, org: String) throws -> Int {
         let target = root.appending(path: account).appending(path: org, directoryHint: .isDirectory)
         var deleted: Set<String> = []
-        var sources: [URL] = []
+        // The latest copy of each chat in the other accounts, by chat id.
+        var latest: [String: (url: URL, entry: Entry)] = [:]
+        var order: [String] = []
         for accountDir in Files.subdirectories(of: root) {
             for dir in Files.subdirectories(of: accountDir) {
                 let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
@@ -22,24 +26,28 @@ public enum ChatSync {
                     if name.hasPrefix("deleted_") {
                         deleted.insert(String(name.dropFirst("deleted_".count)))
                     } else if name.hasPrefix("local_"), name.hasSuffix(".json"), !isTarget {
-                        sources.append(dir.appending(path: name))
+                        let url = dir.appending(path: name)
+                        guard let entry = Entry(url) else { continue }
+                        let id = String(name.dropFirst("local_".count).dropLast(".json".count))
+                        if let current = latest[id] {
+                            if entry.supersedes(current.entry) { latest[id] = (url, entry) }
+                        } else {
+                            latest[id] = (url, entry)
+                            order.append(id)
+                        }
                     }
                 }
             }
         }
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        var archived = ArchivedIndex(target.appending(path: ArchivedIndex.fileName))
         var written = 0
-        for src in sources {
-            let name = src.lastPathComponent
-            let id = String(name.dropFirst("local_".count).dropLast(".json".count))
-            guard !deleted.contains(id) else { continue }
-            let dst = target.appending(path: name)
-            guard let source = Entry(src) else { continue }
-            let existing = Entry(dst)
-            if let existing {
-                // A turn cut off by the quit moves along even when the entry is not newer.
-                let carriesResume = source.isInterrupted && !existing.isInterrupted && source.lastActivity >= existing.lastActivity
-                guard source.lastActivity > existing.lastActivity || carriesResume else { continue }
+        for id in order where !deleted.contains(id) {
+            guard let pick = latest[id] else { continue }
+            let (src, source) = (pick.url, pick.entry)
+            let dst = target.appending(path: src.lastPathComponent)
+            if let existing = Entry(dst) {
+                guard source.supersedes(existing) else { continue }
             } else if FileManager.default.fileExists(atPath: dst.path) {
                 continue // A file Claude cannot read either is left to Claude.
             }
@@ -47,8 +55,10 @@ public enum ChatSync {
             // Connector ids belong to the account that made them; Claude fills
             // in the target account's own connectors when the chat starts.
             if copy.contains("remoteMcpServersConfig") { try copy.set("remoteMcpServersConfig", raw: Data("[]".utf8)) }
-            // Keep the dates, so the copy does not look like a chat at work.
+            // Keep the dates, so the copy does not look like a chat at work,
+            // and the next sync still sees when the chat last changed.
             try Files.writeAtomically(copy.data, to: dst, modified: source.modified)
+            archived?.set("local_\(id)", archived: source.isArchived)
             if source.isInterrupted {
                 // Claude continues a turn the quit cut off in the account it
                 // starts with. Only one copy may carry that, or switching back
@@ -59,6 +69,7 @@ public enum ChatSync {
             }
             written += 1
         }
+        try archived?.save()
         return written
     }
 
@@ -131,6 +142,7 @@ public enum ChatSync {
         var object: JSONObjectText
         var lastActivity: Int64
         var isInterrupted: Bool
+        var isArchived: Bool
         var modified: Date?
 
         init?(_ url: URL) {
@@ -140,6 +152,79 @@ public enum ChatSync {
             lastActivity = object.raw("lastActivityAt").flatMap { Int64(String(decoding: $0, as: UTF8.self)) } ?? 0
             let at = object.raw("interruptedByQuitAt").map { String(decoding: $0, as: UTF8.self) }
             isInterrupted = at != nil && at != "null"
+            isArchived = object.raw("isArchived").map { String(decoding: $0, as: UTF8.self) } == "true"
+        }
+
+        /// Whether this copy of a chat is later than `other`. More recent
+        /// activity wins. At equal activity, a turn the quit cut off wins, so
+        /// it moves along and is continued where Claude starts; after that,
+        /// the later file change wins. Archiving, unarchiving or renaming a
+        /// chat rewrites its entry without touching `lastActivityAt`, and
+        /// copies keep their source's file date, so the date tells which copy
+        /// changed last.
+        func supersedes(_ other: Entry) -> Bool {
+            if lastActivity != other.lastActivity { return lastActivity > other.lastActivity }
+            if isInterrupted != other.isInterrupted { return isInterrupted }
+            guard let mine = modified, let theirs = other.modified else { return false }
+            return mine.timeIntervalSince(theirs) > Self.sameChange
+        }
+
+        /// File dates this close are the same change: a copy carries its
+        /// source's date, which the file system may round.
+        static let sameChange: TimeInterval = 1
+    }
+
+    /// A store's `archived-sessions.idx`, `{"v":1,"archived":["local_<id>", …]}`.
+    /// Claude keeps it in line with `isArchived` in each entry, so a copied
+    /// entry's archive state goes into the target's index too.
+    struct ArchivedIndex {
+        static let fileName = "archived-sessions.idx"
+
+        let url: URL
+        /// The file as Claude wrote it; nil when the store has none yet.
+        private var text: JSONObjectText?
+        private(set) var ids: [String]
+        private var changed = false
+
+        /// Nil for an index that is there but cannot be read: like an entry
+        /// Claude cannot read, it is left to Claude.
+        init?(_ url: URL) {
+            self.url = url
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                text = nil
+                ids = []
+                return
+            }
+            guard let text = try? JSONObjectText(contentsOf: url), let raw = text.raw("archived"),
+                  let ids = try? JSONDecoder().decode([String].self, from: raw) else { return nil }
+            self.text = text
+            self.ids = ids
+        }
+
+        /// Adds `name` (`local_<id>`) for an archived chat, removes it for an open one.
+        mutating func set(_ name: String, archived: Bool) {
+            if archived {
+                guard !ids.contains(name) else { return }
+                ids.append(name)
+                changed = true
+            } else if ids.contains(name) {
+                ids.removeAll { $0 == name }
+                changed = true
+            }
+        }
+
+        /// Writes the index, through a temporary file, when a chat changed in it.
+        func save() throws {
+            guard changed else { return }
+            let list = try JSONSerialization.data(withJSONObject: ids, options: [.withoutEscapingSlashes])
+            let data: Data
+            if var text {
+                try text.set("archived", raw: list)
+                data = text.data
+            } else {
+                data = Data(#"{"v":1,"archived":"#.utf8) + list + Data("}".utf8)
+            }
+            try Files.writeAtomically(data, to: url)
         }
     }
 
