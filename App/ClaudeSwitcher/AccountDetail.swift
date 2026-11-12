@@ -191,9 +191,9 @@ struct ResetsSection: View {
                 }
             } footer: {
                 if let cooldown = resets?.cooldownUntil, cooldown > model.now {
-                    Text("The next reset can be used from \(useByText(cooldown, now: model.now)). Use resets in Claude: once the account reaches a limit a reset refills, Claude offers it. Claude Switcher never uses one, and automatic switching does not count on them.")
+                    Text("The next reset can be used from \(useByText(cooldown, now: model.now)). Use resets in Claude: when the account reaches a limit, Claude's limit message offers one. Claude Switcher never uses one, and automatic switching does not count on them.")
                 } else {
-                    Text("Use resets in Claude: once the account reaches a limit a reset refills, Claude offers it. Claude Switcher never uses one, and automatic switching does not count on them.")
+                    Text("Use resets in Claude: when the account reaches a limit, Claude's limit message offers one. Claude Switcher never uses one, and automatic switching does not count on them.")
                 }
             }
         }
@@ -203,9 +203,14 @@ struct ResetsSection: View {
         var parts: [String] = []
         if grant.label != nil { parts.append(resetKind(grant)) }
         parts.append(String(localized: "Use by \(useByText(grant.endsAt, now: model.now))"))
-        if grant.givesBackWeekly { parts.append(String(localized: "gives back what Fable used of the weekly limit")) }
+        if grant.givesBackWeekly {
+            parts.append(grant.refillsFiveHour
+                         ? String(localized: "refills the 5-hour limit and gives back what Fable used of the week")
+                         : String(localized: "gives back what Fable used of the week"))
+        }
         if grant.paused { parts.append(String(localized: "paused")) }
-        if grant.usableNow { parts.append(String(localized: "can be used now")) }
+        // Claude offers a reset in its limit message, so "now" holds only while the account is at a limit.
+        if grant.usableNow, !(resets?.atLimit.isEmpty ?? true) { parts.append(String(localized: "can be used now")) }
         return parts.joined(separator: " · ")
     }
 }

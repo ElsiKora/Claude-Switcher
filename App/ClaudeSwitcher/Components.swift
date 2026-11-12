@@ -114,8 +114,8 @@ struct ResetsBadge: View {
                 .padding(.vertical, 1)
                 .background(.mint.opacity(0.15), in: .capsule)
                 .help(left == 1
-                      ? String(localized: "1 limit reset left, to use by \(useByText(first.endsAt, now: now)). Use it in Claude once this account reaches a limit it refills.")
-                      : String(localized: "\(left) limit resets left, the first to use by \(useByText(first.endsAt, now: now)). Use them in Claude once this account reaches a limit they refill."))
+                      ? String(localized: "1 limit reset left, to use by \(useByText(first.endsAt, now: now)). Claude offers it in its limit message when this account reaches a limit.")
+                      : String(localized: "\(left) limit resets left, the first to use by \(useByText(first.endsAt, now: now)). Claude offers them in its limit message when this account reaches a limit."))
         }
     }
 }
