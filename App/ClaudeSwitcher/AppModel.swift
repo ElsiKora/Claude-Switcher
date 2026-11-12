@@ -70,6 +70,8 @@ final class AppModel {
     /// Why an account's claude.ai setup could not be read.
     private(set) var cloudErrors: [String: String] = [:]
     private var cloudReadAt: [String: Date] = [:]
+    /// When each account's limit resets were last asked for on claude.ai.
+    private var resetsAskedAt: [String: Date] = [:]
 
     let engine: SwitchEngine
     let api = AnthropicAPI(userAgent: "ClaudeSwitcher/\(AppInfo.version)")
@@ -343,7 +345,9 @@ final class AppModel {
                         record(String(localized: "Added \(account.displayName)."))
                     }
                     await refreshProfile(job.id, token: token)
-                    usage = try await api.usage(token: token)
+                    var read = try await api.usage(token: token)
+                    read.resets = await resets(of: job.id)
+                    usage = read
                 }
                 guard let account = state.account(job.id) else { continue }
                 let seat = Seat.key(job.id, job.org ?? account.org)
@@ -569,6 +573,26 @@ final class AppModel {
     private func setProblem(_ id: String, org: String?, _ problem: String) {
         state.update(id) { a in
             if let org, let i = a.orgs?.firstIndex(where: { $0.id == org }) { a.orgs?[i].problem = problem } else { a.problem = problem }
+        }
+    }
+
+    /// An account's limit resets, asked for on claude.ai with its own session
+    /// at most every `Policy.resetsEvery`: the limits come from Claude's
+    /// sign-in, which claude.ai does not tell resets to. In between, and when
+    /// claude.ai cannot be asked, the last ones read.
+    private func resets(of id: String) async -> LimitResets? {
+        guard let account = state.account(id) else { return nil }
+        let last = account.usage?.resets
+        if let asked = resetsAskedAt[id], now.timeIntervalSince(asked) < Policy.resetsEvery { return last }
+        resetsAskedAt[id] = now
+        let store = cookieStore(for: account)
+        guard FileManager.default.fileExists(atPath: store.path) else { return last }
+        let (ua, org) = (AppInfo.webUserAgent, account.org)
+        do {
+            return try await Task.detached { try await ClaudeWeb(cookieStore: store, userAgent: ua).resets(org: org) }.value ?? last
+        } catch {
+            log.info("resets \(id.prefix(8)): \(error.localizedDescription)")
+            return last
         }
     }
 

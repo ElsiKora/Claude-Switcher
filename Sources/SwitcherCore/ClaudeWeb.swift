@@ -115,6 +115,12 @@ public struct ClaudeWeb: Sendable {
         return usage
     }
 
+    /// A workspace's limit resets alone, as claude.ai's Settings ask for them.
+    /// Nil when claude.ai says nothing about them.
+    public func resets(org: String) async throws -> LimitResets? {
+        try await LimitResets(json: object("/api/organizations/\(org)/usage?cedar_ember=1&skip_spend=1")["cedar_ember"])
+    }
+
     /// Sets the workspace claude.ai and Claude open: the `lastActiveOrg`
     /// cookie, which Claude reads when it starts and mints its sign-in for.
     /// Claude must be closed. The cookie has to exist: Claude writes it the

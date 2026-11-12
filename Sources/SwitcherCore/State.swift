@@ -272,6 +272,8 @@ public enum Policy {
     public static let hotEvery: TimeInterval = 60
     public static let hotAt: Double = 85
     public static let idleEvery: TimeInterval = 10 * 60
+    /// Limit resets change seldom: claude.ai is asked for an account's at most this often.
+    public static let resetsEvery: TimeInterval = 10 * 60
     static let activeFresh: TimeInterval = 5 * 60
     static let idleFresh: TimeInterval = idleEvery + 5 * 60
     public static let maxBackoff: TimeInterval = 30 * 60

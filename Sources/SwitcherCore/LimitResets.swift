@@ -52,14 +52,17 @@ public struct LimitResets: Codable, Sendable, Equatable {
     /// No reset can be used before this.
     public var cooldownUntil: Date?
     public var grants: [Grant]
+    /// When claude.ai was asked.
+    public var checkedAt: Date?
 
     public init(eligible: Bool, ineligibleReason: String? = nil, atLimit: [String] = [], cooldownUntil: Date? = nil,
-                grants: [Grant] = []) {
+                grants: [Grant] = [], checkedAt: Date? = nil) {
         self.eligible = eligible
         self.ineligibleReason = ineligibleReason
         self.atLimit = atLimit
         self.cooldownUntil = cooldownUntil
         self.grants = grants
+        self.checkedAt = checkedAt
     }
 
     /// The grants that can still be used, the one ending first first.
@@ -77,7 +80,7 @@ extension LimitResets {
     /// Reads `cedar_ember` the way claude.ai's own client does: nil when it
     /// is missing or says nothing about eligibility, and a grant without an
     /// id, a count or a use-by date is left out.
-    public init?(json: Any?) {
+    public init?(json: Any?, at now: Date = .now) {
         guard let o = json as? [String: Any], let eligible = o["eligible"] as? Bool else { return nil }
         let atLimit = o["at_limit"] as? Bool == true ? (o["exhausted"] as? [String] ?? []) : []
         let cooldown = AnthropicAPI.date(o["cooldown_until"] as? String)
@@ -104,6 +107,6 @@ extension LimitResets {
                                 usableNow: usable))
         }
         self.init(eligible: eligible, ineligibleReason: eligible ? nil : o["ineligible_reason"] as? String, atLimit: atLimit,
-                  cooldownUntil: cooldown, grants: grants)
+                  cooldownUntil: cooldown, grants: grants, checkedAt: now)
     }
 }
