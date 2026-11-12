@@ -188,6 +188,7 @@ struct PanelAccountRow: View {
                         } else if !account.plan.isEmpty {
                             Text(account.plan).font(.system(size: 11)).foregroundStyle(.secondary)
                         }
+                        ResetsBadge(resets: seat.usage?.resets, now: model.now)
                         if seat.excluded {
                             Image(systemName: "hand.raised.fill").font(.system(size: 9)).foregroundStyle(.secondary)
                                 .help("Left out of automatic switching")

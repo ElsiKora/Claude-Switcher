@@ -445,8 +445,9 @@ final class AppModel {
     /// The no-room moment already told, so each is told once.
     private var noRoomTold: Policy.NoRoom?
 
-    /// The active account has run out and no account has room: says so, and
-    /// which account has room again first.
+    /// The active account has run out and no account has room: says so,
+    /// which account has room again first, and which accounts still have
+    /// limit resets to use by hand.
     private func noteNoRoom() {
         guard state.autoSwitch, let stuck = Policy.noRoom(state, active: activeSeatID, now: now) else {
             noRoomTold = nil
@@ -454,10 +455,17 @@ final class AppModel {
         }
         guard stuck != noRoomTold else { return }
         noRoomTold = stuck
-        let text = if let next = stuck.next {
+        var text = if let next = stuck.next {
             String(localized: "\(stuck.seat.displayName) is nearly full and no account has room to switch to. \(next.seat.displayName) has room again at \(next.at.formatted(date: .omitted, time: .shortened)).")
         } else {
             String(localized: "\(stuck.seat.displayName) is nearly full and no account has room to switch to.")
+        }
+        let withResets = state.seats.compactMap { seat -> String? in
+            let left = seat.usage?.resets?.left(at: now) ?? 0
+            return left > 0 && seat.runsClaudeCode && hasSignIn(seat.account) ? "\(seat.displayName) (\(left))" : nil
+        }
+        if !withResets.isEmpty {
+            text += " " + String(localized: "Limit resets left: \(withResets.joined(separator: ", ")). Use one in Claude once that account reaches its limit.")
         }
         record(text)
         notifier.noRoom(stuck, text: text)

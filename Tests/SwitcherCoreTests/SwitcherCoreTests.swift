@@ -496,6 +496,51 @@ private func write(_ text: String, _ url: URL) throws {
     }
 }
 
+@Suite struct LimitResetsTests {
+    /// claude.ai's `cedar_ember`, as its own client reads it.
+    @Test func readsTheGrantsClaudeAiReports() throws {
+        let now = try #require(AnthropicAPI.date("2033-05-18T03:30:00Z"))
+        let json = """
+        {"eligible": true, "at_limit": true, "exhausted": ["five_hour"], "next_grant_id": "g-session",
+         "grants": [
+           {"id": "g-session", "resets_total": 3, "resets_left": 2, "ends_at": "2033-05-20T00:00:00Z",
+            "clears": ["five_hour"], "usable_now": true},
+           {"id": "g-fable", "label": "Fable week", "resets_total": 1, "resets_left": 1, "ends_at": "2033-05-19T00:00:00Z",
+            "clears": ["seven_day_opus"], "gives_back_weekly": true, "usable_now": true},
+           {"id": "g-paused", "resets_total": 1, "resets_left": 1, "ends_at": "2033-05-25T00:00:00Z", "clears": ["seven_day"], "paused": true},
+           {"id": "g-over", "resets_total": 1, "resets_left": 1, "ends_at": "2033-05-01T00:00:00Z", "clears": ["seven_day"]},
+           {"id": "g-nodate", "resets_total": 1, "resets_left": 1, "clears": ["seven_day"]},
+           {"id": "g-session", "resets_total": 9, "resets_left": 9, "ends_at": "2033-05-20T00:00:00Z", "clears": ["five_hour"]}
+         ]}
+        """
+        let resets = try #require(LimitResets(json: JSONSerialization.jsonObject(with: Data(json.utf8))))
+        #expect(resets.grants.map(\.id) == ["g-session", "g-fable", "g-paused", "g-over"])
+        // Paused and past grants count for nothing; the one ending first comes first.
+        #expect(resets.active(at: now).map(\.id) == ["g-fable", "g-session"])
+        #expect(resets.left(at: now) == 3)
+        // Only the grant Claude names next, at a limit it refills, can be used now.
+        #expect(resets.grants.map(\.usableNow) == [true, false, false, false])
+        #expect(resets.grants[1].refillsWeekly && !resets.grants[1].refillsFiveHour && resets.grants[1].label == "Fable week")
+
+        // During a cooldown nothing can be used; an account that does not take part says why.
+        let cooling = """
+        {"eligible": true, "at_limit": true, "exhausted": ["five_hour"], "next_grant_id": "g", "cooldown_until": "2033-05-18T05:00:00Z",
+         "grants": [{"id": "g", "resets_total": 1, "resets_left": 1, "ends_at": "2033-05-20T00:00:00Z", "clears": ["five_hour"], "usable_now": true}]}
+        """
+        #expect(try LimitResets(json: JSONSerialization.jsonObject(with: Data(cooling.utf8)))?.grants.first?.usableNow == false)
+        let notIn: [String: Any] = ["eligible": false, "ineligible_reason": "not_enrolled", "grants": [["id": "x"]]]
+        let out = try #require(LimitResets(json: notIn))
+        #expect(out.ineligibleReason == "not_enrolled" && out.grants.isEmpty && out.left(at: now) == 0)
+        #expect(LimitResets(json: ["grants": [Any]()] as [String: Any]) == nil && LimitResets(json: nil) == nil)
+
+        // Usage saved before resets were read still loads.
+        let old = Usage(session: 1, sessionReset: nil, weekly: 2, weeklyReset: nil, checkedAt: now)
+        var saved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(old)) as? [String: Any] ?? [:]
+        saved["resets"] = nil
+        #expect(try JSONDecoder().decode(Usage.self, from: JSONSerialization.data(withJSONObject: saved)).resets == nil)
+    }
+}
+
 /// Run with SWITCHER_REAL_CONFIG=<a copy of Claude's config.json> to check the
 /// editor against the file Claude writes today.
 @Suite struct RealConfigTests {

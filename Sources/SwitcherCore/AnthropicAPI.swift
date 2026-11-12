@@ -27,6 +27,8 @@ public struct Usage: Codable, Sendable, Equatable {
     public var checkedAt: Date
     /// Extra usage billed beyond the plan this month, when the plan has it on.
     public var extra: ExtraUsage?
+    /// Limit resets the account can use by hand, when claude.ai reports them.
+    public var resets: LimitResets?
 
     public init(session: Double, sessionReset: Date?, weekly: Double, weeklyReset: Date?, checkedAt: Date) {
         self.session = session
@@ -138,9 +140,13 @@ public struct AnthropicAPI: Sendable {
             var seven_day: Window?
             var extra_usage: Extra?
         }
-        let body: Body = try await get("/api/oauth/usage", token: token)
-        return Self.usage(body.five_hour?.utilization, body.five_hour?.resets_at, body.seven_day?.utilization, body.seven_day?.resets_at,
-                          extra: body.extra_usage.map { ($0.is_enabled, $0.used_credits, $0.monthly_limit, $0.currency) })
+        // `cedar_ember=1` adds the account's limit resets, as Claude Code asks for them.
+        let data = try await fetch("/api/oauth/usage", query: [URLQueryItem(name: "cedar_ember", value: "1")], token: token)
+        let body = try JSONDecoder().decode(Body.self, from: data)
+        var usage = Self.usage(body.five_hour?.utilization, body.five_hour?.resets_at, body.seven_day?.utilization, body.seven_day?.resets_at,
+                               extra: body.extra_usage.map { ($0.is_enabled, $0.used_credits, $0.monthly_limit, $0.currency) })
+        usage.resets = LimitResets(json: (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["cedar_ember"])
+        return usage
     }
 
     /// Usage as `/api/oauth/usage` and claude.ai's own usage page report it.
@@ -161,7 +167,13 @@ public struct AnthropicAPI: Sendable {
     }
 
     private func get<T: Decodable>(_ path: String, token: String) async throws -> T {
-        var request = URLRequest(url: Self.base.appending(path: path))
+        try await JSONDecoder().decode(T.self, from: fetch(path, token: token))
+    }
+
+    /// The body of a successful GET.
+    private func fetch(_ path: String, query: [URLQueryItem] = [], token: String) async throws -> Data {
+        let url = Self.base.appending(path: path)
+        var request = URLRequest(url: query.isEmpty ? url : url.appending(queryItems: query))
         request.timeoutInterval = 15
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -170,7 +182,7 @@ public struct AnthropicAPI: Sendable {
         let http = response as? HTTPURLResponse
         switch http?.statusCode ?? 0 {
         case 200:
-            return try JSONDecoder().decode(T.self, from: data)
+            return data
         case 401:
             throw APIError.signedOut
         case 429:

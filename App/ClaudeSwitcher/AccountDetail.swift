@@ -59,6 +59,10 @@ struct AccountDetail: View {
             }
 
             ForEach(model.state.seats.filter { $0.account.id == account.id }) { seat in
+                ResetsSection(seat: seat)
+            }
+
+            ForEach(model.state.seats.filter { $0.account.id == account.id }) { seat in
                 SetupSection(seat: seat)
             }
 
@@ -146,6 +150,63 @@ struct AccountDetail: View {
                 SettingsIcon(systemName: icon, color: color)
             }
         }
+    }
+}
+
+/// The limit resets claude.ai gave the account in one workspace: what each
+/// refills, how many are left and by when to use them. They are used in
+/// Claude itself; the switcher never uses one.
+struct ResetsSection: View {
+    @Environment(AppModel.self) private var model
+    let seat: Seat
+
+    private var resets: LimitResets? { seat.usage?.resets }
+    private var grants: [LimitResets.Grant] {
+        (resets?.grants ?? []).filter { $0.endsAt > model.now }.sorted { $0.endsAt < $1.endsAt }
+    }
+
+    var body: some View {
+        if !grants.isEmpty {
+            Section {
+                ForEach(grants) { grant in
+                    let active = grant.isActive(at: model.now)
+                    LabeledContent {
+                        Text(grant.left == 0 ? String(localized: "None left") : String(localized: "\(grant.left) of \(grant.total) left"))
+                            .monospacedDigit()
+                            .foregroundStyle(active ? .primary : .secondary)
+                    } label: {
+                        Label {
+                            Text(grant.label ?? resetKind(grant))
+                            Text(detail(grant))
+                        } icon: {
+                            SettingsIcon(systemName: "arrow.counterclockwise", color: active ? .mint : .gray)
+                        }
+                    }
+                }
+            } header: {
+                if let org = seat.org {
+                    Text("Limit Resets in \(org.label)")
+                } else {
+                    Text("Limit Resets")
+                }
+            } footer: {
+                if let cooldown = resets?.cooldownUntil, cooldown > model.now {
+                    Text("The next reset can be used from \(useByText(cooldown, now: model.now)). Use resets in Claude: once the account reaches a limit a reset refills, Claude offers it. Claude Switcher never uses one, and automatic switching does not count on them.")
+                } else {
+                    Text("Use resets in Claude: once the account reaches a limit a reset refills, Claude offers it. Claude Switcher never uses one, and automatic switching does not count on them.")
+                }
+            }
+        }
+    }
+
+    private func detail(_ grant: LimitResets.Grant) -> String {
+        var parts: [String] = []
+        if grant.label != nil { parts.append(resetKind(grant)) }
+        parts.append(String(localized: "Use by \(useByText(grant.endsAt, now: model.now))"))
+        if grant.givesBackWeekly { parts.append(String(localized: "gives back what Fable used of the weekly limit")) }
+        if grant.paused { parts.append(String(localized: "paused")) }
+        if grant.usableNow { parts.append(String(localized: "can be used now")) }
+        return parts.joined(separator: " · ")
     }
 }
 

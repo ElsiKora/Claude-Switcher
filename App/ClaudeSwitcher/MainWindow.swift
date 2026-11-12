@@ -124,6 +124,7 @@ struct AccountRow: View {
                 HStack(spacing: 4) {
                     Text(account.displayName)
                         .lineLimit(1)
+                    ResetsBadge(resets: accountResets(account, in: model.state), now: model.now, size: 9)
                     if model.state.leftOut(account) {
                         Image(systemName: "hand.raised.fill")
                             .font(.caption2)

@@ -34,6 +34,14 @@ enum Demo {
         ]
         st.accounts[0].usage?.extra = ExtraUsage(enabled: true, usedCents: 4_210, limitCents: 20_000, currency: "USD")
         st.accounts[1].usage?.extra = ExtraUsage(enabled: false, usedCents: nil, limitCents: nil, currency: nil)
+        // Limit resets claude.ai gave: two 5-hour resets of three, and a Fable reset.
+        st.accounts[0].usage?.resets = LimitResets(eligible: true, grants: [
+            LimitResets.Grant(id: "demo-5h", left: 2, total: 3, endsAt: now.addingTimeInterval(5 * 86_400), refills: ["five_hour"]),
+        ])
+        st.accounts[2].usage?.resets = LimitResets(eligible: true, grants: [
+            LimitResets.Grant(id: "demo-fable", left: 1, total: 1, endsAt: now.addingTimeInterval(2 * 86_400),
+                              refills: ["seven_day_opus"], givesBackWeekly: true),
+        ])
         // Studio is in a team too: two workspaces, Team open.
         var personal = Org(id: "org-a2p", name: "Studio's Organization", kind: .personal)
         personal.usage = Usage(session: 0, sessionReset: nil, weekly: 12, weeklyReset: now.addingTimeInterval(80 * 3600), checkedAt: now)

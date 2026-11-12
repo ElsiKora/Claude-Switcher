@@ -81,11 +81,13 @@ It runs in the menu bar, reads each account's 5-hour and weekly limits from Anth
 - ✨ **Shared chats and projects**: every account's Claude Code chat list holds the same chats. Chats you deleted stay deleted. Archiving, unarchiving or renaming a chat carries over at the next switch, also after switching accounts or workspaces in Claude itself.
 - ✨ **Work continues after a switch**: chats that were mid-turn, running a command, waiting on a background agent, or stopped by the usage limit are marked as interrupted. When every account is out, the journal and a notification say which account has room again first, and when. Claude continues the main chats, and they check on their side sessions.
 - ✨ **Live limits**: both limits of every account, as rings in the menu bar and the window, with their reset times and when they run out at the pace of the last checks.
+- ✨ **Limit resets**: when claude.ai gives an account limit resets, a badge shows how many are left, and the account's page shows what each one refills (the 5-hour limit, the week, or what Fable used) and the date to use it by. You use a reset in Claude itself, once the account reaches its limit; Claude Switcher never uses one, and automatic switching does not count on them. When no account has room, the notice names the accounts that still have resets.
 - ✨ **Automatic switching** (optional), built to switch rarely, since every switch makes each open chat read its context again in the new account:
   - before the limit runs out at the current pace, or at your threshold at the latest; earlier on an account with extra usage on;
   - to the account whose free room would reset unused first, never to one that is already billing extra usage;
   - at a pause between replies when there is still room, waiting three minutes at most;
   - to an account whose week resets within a day, only when that week is worth clearly more than the switch costs;
+  - leaving Enterprise accounts and workspaces out, if you choose;
   - paused for two hours with one click.
 - ✨ **Same setup everywhere**: compares each account's connectors, tool permissions, plugins and skills on claude.ai with a reference account. Copy Setup adds what is missing, and only runs when you click it.
 - ✨ **Workspaces**: an account in a team shows its Personal and Team workspaces, each with its own limits and its own setup; automatic switching counts every workspace, and you can leave one out. Switch workspaces in Claude, and the switcher follows.

@@ -97,9 +97,9 @@ public struct ClaudeWeb: Sendable {
         }
     }
 
-    /// A workspace's limits, as claude.ai's usage page reads them.
+    /// A workspace's limits and its limit resets, as claude.ai's usage page reads them.
     public func usage(org: String) async throws -> Usage {
-        let body = try await object("/api/organizations/\(org)/usage")
+        let body = try await object("/api/organizations/\(org)/usage?cedar_ember=1")
         func window(_ key: String) -> (Double?, String?) {
             let w = body[key] as? [String: Any]
             return ((w?["utilization"] as? NSNumber)?.doubleValue, w?["resets_at"] as? String)
@@ -107,10 +107,12 @@ public struct ClaudeWeb: Sendable {
         let (session, sessionReset) = window("five_hour")
         let (weekly, weeklyReset) = window("seven_day")
         let e = body["extra_usage"] as? [String: Any]
-        return AnthropicAPI.usage(session, sessionReset, weekly, weeklyReset, extra: e.map {
+        var usage = AnthropicAPI.usage(session, sessionReset, weekly, weeklyReset, extra: e.map {
             (($0["is_enabled"] as? NSNumber)?.boolValue, ($0["used_credits"] as? NSNumber)?.doubleValue,
              ($0["monthly_limit"] as? NSNumber)?.doubleValue, $0["currency"] as? String)
         })
+        usage.resets = LimitResets(json: body["cedar_ember"])
+        return usage
     }
 
     /// Sets the workspace claude.ai and Claude open: the `lastActiveOrg`

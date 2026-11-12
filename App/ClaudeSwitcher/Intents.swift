@@ -78,7 +78,7 @@ struct SwitchToBestAccountIntent: AppIntent {
 
 struct ClaudeUsageIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Claude Usage"
-    static let description = IntentDescription("Tells how much of the 5-hour and weekly limits each account has used.")
+    static let description = IntentDescription("Tells how much of the 5-hour and weekly limits each account has used, and how many limit resets it has left.")
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
@@ -86,7 +86,9 @@ struct ClaudeUsageIntent: AppIntent {
         let lines = model.sortedAccounts.map { a in
             let u = a.usage?.current(at: model.now)
             let mark = a.id == model.active ? " (signed in)" : ""
-            return "\(a.displayName)\(mark): 5-hour \(percentText(u?.session)), week \(percentText(u?.weekly))"
+            let left = accountResets(a, in: model.state)?.left(at: model.now) ?? 0
+            let resets = left == 0 ? "" : left == 1 ? ", 1 limit reset left" : ", \(left) limit resets left"
+            return "\(a.displayName)\(mark): 5-hour \(percentText(u?.session)), week \(percentText(u?.weekly))\(resets)"
         }
         let text = lines.isEmpty ? "No accounts yet." : lines.joined(separator: "\n")
         return .result(value: text, dialog: "\(text)")
